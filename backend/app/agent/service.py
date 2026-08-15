@@ -10,7 +10,7 @@ from ..models import (
     Approval,
     ResponseAction,
     ExecutionEvent,
-    ResponseAction,
+    AuditEvent,
 )
 
 from ..governance.gateway import GovernanceGateway
@@ -111,7 +111,7 @@ class AgentService:
                 "data_source": tool.data_source if tool else None,
                 "action": tool.action if tool else None,
             },
-        ))
+        )
         self.db.add(ExecutionEvent(
             run_id=run_id,
             agent_id=agent.id,
@@ -138,7 +138,7 @@ class AgentService:
                 event_type="WARNING_TRIGGERED",
                 actor="governance",
                 details={"level": decision.warning, "reason": decision.reason},
-            )
+            ))
 
         # -------------------------------------
         # BLOCK
@@ -173,7 +173,7 @@ class AgentService:
             event_type="TOOL_ALLOWED",
             actor="governance",
             details={"tool": tool_name},
-        ))
+        )
         self.db.add(ExecutionEvent(
             run_id=run_id,
             agent_id=agent.id,
@@ -225,8 +225,6 @@ class AgentService:
             action_type="BLOCK",
             status="EXECUTED",
             reason=decision.reason,
-
-            status="open",
         )
 
         self.db.add(finding)
@@ -314,7 +312,7 @@ class AgentService:
             event_type="AGENT_BLOCKED",
             actor="governance",
             details={"reason": decision.reason},
-        )
+        ))
 
         self.db.commit()
 
@@ -565,10 +563,10 @@ class AgentService:
             status="SUCCESS",
             details={
                 "approval_id": str(approval_id),
-                "arguments": arguments,
+                "arguments": request.arguments,
                 "result": result,
             },
-        )
+        ))
         create_audit_event(
             db=self.db,
             agent_id=agent.id,
@@ -577,15 +575,18 @@ class AgentService:
             event_type="APPROVED_ACTION_EXECUTED",
             actor=approved_by,
             details={"approval_id": str(approval_id), "tool": request.tool_name},
-        ))
+        )
         run.status = "completed"
         run.completed_at = datetime.now(timezone.utc)
         self.db.commit()
         return {"status": "completed", "tool": request.tool_name, "result": result}
 
     @staticmethod
-    def _invoke_tool(tool_name: str, message: str):
-        request = decide_tool_request(message)
+    def _invoke_tool(tool_name: str, message: str, arguments: dict | None = None):
+        if arguments is not None:
+            request = ToolRequest(tool_name=tool_name, arguments=arguments)
+        else:
+            request = decide_tool_request(message)
         if request.tool_name != tool_name:
             raise ValueError("Tool does not match the original request")
         return AgentService._execute_request(tool_name, request.arguments)
