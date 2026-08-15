@@ -47,6 +47,7 @@ class Tool:
     data_source: str
     action: str
     arguments: tuple[str, ...]
+    requires_approval: bool = False
 
 
 TOOLS: dict[str, Tool] = {
@@ -65,6 +66,7 @@ TOOLS: dict[str, Tool] = {
         data_source="email_service",
         action="send_email",
         arguments=("recipient", "message"),
+        requires_approval=True,
     ),
 
     "customer_database": Tool(
@@ -73,6 +75,7 @@ TOOLS: dict[str, Tool] = {
         data_source="customer_database",
         action="read",
         arguments=("customer_id",),
+        requires_approval=True,
     ),
 }
 

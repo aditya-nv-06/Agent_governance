@@ -65,6 +65,10 @@ class ApprovalDecisionRequest(BaseModel):
     decided_by: str = Field(min_length=1, max_length=100)
     reason: str = Field(min_length=1, max_length=1000)
 
+class ApprovalReviewRequest(BaseModel):
+    decision_reason: str = Field(min_length=1, max_length=1000)
+    decided_by: str = Field(default="human_reviewer", min_length=1, max_length=100)
+
 class RunCreate(BaseModel):
     agent_id: uuid.UUID
 
@@ -129,6 +133,15 @@ class EventResponse(BaseModel):
     }
     
 class AgentDecisionRequest(BaseModel):
+    message: str = Field(
+        min_length=1,
+        max_length=5000,
+    )
+
+
+class AgentRunInRunRequest(BaseModel):
+    agent_id: uuid.UUID
+    run_id: uuid.UUID
     message: str = Field(
         min_length=1,
         max_length=5000,

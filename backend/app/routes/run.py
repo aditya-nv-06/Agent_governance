@@ -126,7 +126,7 @@ def execute_run(
     result = service.run(
         agent_id=run.agent_id,
         run_id=run.id,
-        message="Get customer information from the database",
+        message=run.input_message,
     )
 
     return result
