@@ -1,62 +1,188 @@
-# Agent Governance Platform — v1
+# AI Agent Governance Platform
 
-A focused governance layer for autonomous agents. It defines approved behavior, observes each runtime request, checks its tool/data/action scope and usage limit, blocks deviations, supports controlled human approval, and records the full trail.
+A full-stack governance layer for LLM-powered agents. The app enforces who may call which tools, which data sources and actions are permitted, and how many LLM calls are allowed before usage crosses warning or critical thresholds.
+
+## Why this project exists
+
+Large language models can propose tool calls, but they should not be allowed to decide policy on their own. This project adds a policy boundary that blocks unauthorized actions, logs every decision, and requires human approval for higher-risk steps.
+
+## Key product rules
+
+- An agent cannot be created without a behavior profile.
+- Each agent is scoped to the authenticated admin user.
+- Approval is required for blocked or sensitive actions.
+- Every allowed, denied, and approved action is written to audit records.
+- Delete-agent support is available for admins who own the agent.
 
 ## Architecture
 
-``` text
-React dashboard ── /api proxy ──> FastAPI
-                                     │
-                                     ├── Behavior profile (tools, data, actions, thresholds)
-                                     ├── Agent runner → policy evaluator → mock tool adapter
-                                     └── PostgreSQL (runs, findings, approvals, audit events)
-```
+![Runtime architecture](docs/architecture.png)
 
-## Governance flow
+### Components
+
+- Backend: FastAPI + SQLAlchemy + PostgreSQL/SQLite test support
+- Frontend: React + Vite + Tailwind CSS
+- Governance engine: policy checks for tools, data sources, actions, thresholds, and approvals
+- Data model: admin users, agents, behavior profiles, runs, findings, approvals, audit events
+
+## Behavior profile model
+
+Each agent must include a behavior profile at creation time. The profile includes:
+
+- name
+- allowed tools
+- allowed data sources
+- allowed actions
+- max LLM calls
+- warning threshold
+- critical threshold
+
+The demo seed configuration creates a customer support agent whose approved behavior is intentionally narrower than the full tool registry.
+
+## Demo flow
+
+1. Create an admin account or log in.
+2. Create an agent and attach a profile in the same step.
+3. Run a prompt that triggers an allowed tool.
+4. Run a prompt that attempts a disallowed tool.
+5. Review the generated finding and approval workflow.
+6. Approve or reject the request from the dashboard.
+
+## Project structure
 
 ```text
-User request → LLM proposes ToolRequest → governance evaluation
-     ├─ ALLOW            → execute → run completed → audit
-     ├─ REQUIRE_APPROVAL → finding → response action → approval → audit (nothing executes yet)
-     └─ BLOCK            → finding → response action → agent blocked → approval → audit
-
-approval decision
-     ├─ approve → resume → execute the original ToolRequest (same arguments) → audit
-     └─ reject  → finding rejected, run blocked → audit
+backend/
+  app/
+    agent/            LLM decision support and execution helpers
+    governance/       Policy evaluation, enforcement, and findings
+    routes/           API layer for auth, agents, profiles, runs, findings, approvals, audit
+    models.py         SQLAlchemy schema
+    schemas.py        Validation models for API payloads
+  tests/              Automated checks for auth, governance, and approvals
+  seed.py             Local demo-data seeding
+frontend/
+  src/                React dashboard and API client
+  package.json        frontend dependencies and scripts
+docs/
+  architecture.png   runtime diagram
+.github/workflows/    CI automation for backend and frontend
 ```
 
-## Run locally
+## Local startup
 
-1. Copy `backend/.env.example` to `backend/.env` and set `DATABASE_URL`. Set `OPENAI_API_KEY` (and optionally `OPENAI_MODEL`) to enable the LLM decision layer; without a key the deterministic rule-based agent is used.
-2. Start the API: `cd backend && ./.venv/bin/uvicorn app.main:app --reload`
-3. Start the dashboard: `cd frontend && npm install && npm run dev`
-4. Seed a demo agent and its profile once: `cd backend && ./.venv/bin/python seed.py`
+### 1) Backend configuration
 
-Open `http://localhost:5173`. The Vite proxy forwards `/api` requests to FastAPI.
+Create `backend/.env` with values like:
 
-## Demo scenario
+```bash
+DATABASE_URL=postgresql+psycopg://USER:PASSWORD@localhost:5432/agent_governance
+OPENAI_API_KEY=your-key-if-using-live-llm-decisions
+AUTH_SECRET=change-this-secret
+```
 
-The seeded Customer Support Agent is permitted to use `faq_search` and `send_email`.
+For tests, the app supports SQLite via environment variables when `ALLOW_SQLITE_FOR_TESTS=true`.
 
-- Enter a FAQ request: the run completes and writes `AGENT_RUN_STARTED`, `TOOL_REQUESTED`, `TOOL_ALLOWED`, `TOOL_EXECUTION`, and `RUN_COMPLETED` audit events.
-- Enter an email request: `send_email` is authorized but flagged high-risk, so the run pauses at `pending_approval` with a `HIGH_RISK_ACTION` finding, a `REQUIRE_APPROVAL` response action, and a pending approval. The tool does not run until a human approves it.
-- Enter a request containing `customer` or `database`: the agent selects `customer_database`, which is unauthorized. v1 creates a high-severity finding, a `BLOCK` response action, blocks the agent, creates an approval, and records `FINDING_CREATED`, `APPROVAL_REQUESTED`, and `AGENT_BLOCKED`.
-- Approve the pending request in the dashboard to resume the agent, then select **Execute**. The API executes only the tool captured in the original finding and writes an `APPROVED_ACTION_EXECUTED` audit event. A pending or rejected approval receives `403` from this endpoint.
-- Reject the request to keep the block confirmed.
+### 2) Install dependencies
 
-## API surface
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
-- `GET /agents`, `POST /agents`, `GET /profiles`, `POST /profiles`, `PUT /profiles/{id}`
-- `POST /runs`, `GET /runs`
-- `POST /agent/run` (run the agent inside an existing run), `POST /agent/decide`, `GET /agent/tools`
-- `GET /findings`, `GET /approvals`, `POST /approvals/{id}/approve`, `POST /approvals/{id}/reject`, `POST /approvals/{id}/decision`, `POST /approvals/{id}/execute`, `GET /audit`
+### 3) Seed demo data
 
-Interactive API documentation is available at `http://localhost:8000/docs`.
+```bash
+cd backend
+source .venv/bin/activate
+python seed.py
+```
 
-## Design notes and limitations
+This ensures the demo admin `adityanv4@gmail.com` is created and seeded with the sample agent configuration.
 
-- The LLM only proposes a tool request; it never executes a tool. Every proposal — including one naming an unregistered tool — is evaluated by the governance layer before `app/agent/executor.py` may run anything. `POST /agent/decide` returns the raw proposal without executing it.
-- If the LLM is not configured or its call fails, the run falls back to the deterministic rule-based agent, and the `TOOL_REQUESTED` audit event records which decision source (`llm`, `rules`, `rules_fallback`) and model produced the request.
-- Tools carry a `requires_approval` flag. An authorized high-risk tool yields `REQUIRE_APPROVAL` rather than executing: the executor is only reached after a human approves, and it replays the arguments recorded in the run's `LLM_TOOL_REQUEST` execution event.
-- Tool selection is monitored at the runtime gateway. Tool, data source, and action are enforced using tool metadata. A daily run count acts as the v1 LLM-call usage metric and writes a warning audit event at configured warning/critical thresholds; usage over the configured maximum is blocked.
-- The startup migration is additive for the initial local PostgreSQL schema. A production version should replace it with Alembic migrations and authentication/role checks around profile and approval changes.
+### 4) Run the API
+
+```bash
+cd backend
+source .venv/bin/activate
+uvicorn app.main:app --reload --port 8000
+```
+
+### 5) Run the frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The frontend proxies `/api` to the backend automatically when running through Vite.
+
+## API overview
+
+Key routes:
+
+- `POST /auth/register`
+- `POST /auth/login`
+- `GET /agents`
+- `POST /agents`
+- `DELETE /agents/{agent_id}`
+- `GET /profiles`
+- `POST /profiles`
+- `POST /runs`
+- `GET /findings`
+- `GET /approvals`
+- `POST /approvals/{approval_id}/decision`
+- `POST /approvals/{approval_id}/execute`
+- `GET /audit`
+
+The Swagger UI is available at `/docs` in the FastAPI app.
+
+## Tests
+
+Run the local backend tests with:
+
+```bash
+cd backend
+source .venv/bin/activate
+python -m unittest discover -s tests -v
+```
+
+The suite covers:
+
+- auth registration and login
+- agent creation validation
+- governance blocking for unauthorized and unknown tools
+- warning and critical threshold behavior
+- approval restrictions and approved execution rules
+
+## GitHub workflow automation
+
+The repository includes CI checks for both application layers:
+
+- `.github/workflows/backend-ci.yml`
+- `.github/workflows/frontend-ci.yml`
+
+These workflows run on push and pull request and validate that the backend tests still pass and the frontend still builds successfully.
+
+## Troubleshooting
+
+### Agent creation fails
+
+The API now rejects requests with no behavior profile payload. Ensure the request includes a `profile` object when creating an agent.
+
+### Session shows the wrong user data
+
+The frontend stores session data under a user-specific key so that a second login does not overwrite the first one in the browser.
+
+### Delete agent button does nothing
+
+The backend route deletes related findings, runs, approvals, behavior profiles, audit events, and the agent record itself. If the endpoint still fails, confirm the authenticated admin owns the agent and the backend is running.
+
+## Future improvements
+
+- Add Alembic migrations for schema evolution
+- Add stricter role-based authorization for approvers and admins
+- Add deployment automation for staging and production
+- Add end-to-end browser tests for the dashboard flow

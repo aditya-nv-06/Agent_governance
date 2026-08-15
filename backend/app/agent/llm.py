@@ -2,7 +2,7 @@ import json
 import os
 
 from dotenv import load_dotenv
-from openai import OpenAI
+from openai import APIStatusError, OpenAI
 
 from .decision import ToolRequest
 from .tools import TOOLS
@@ -11,97 +11,65 @@ from .tools import TOOLS
 load_dotenv()
 
 
-DEFAULT_MODEL = "gpt-5-mini"
+class LLMQuotaError(RuntimeError):
+    """The configured OpenAI project cannot spend API quota."""
+
+
+class LLMServiceError(RuntimeError):
+    """A provider failure that should not expose raw details to the client."""
 
 
 SYSTEM_PROMPT = """
-You are a customer support AI agent.
+You are a customer support AI agent. Your only job is to propose one tool
+request for the user's message.
 
-Your job is to decide which tool should be requested
-to satisfy the user's request.
-
-IMPORTANT:
-
-You DO NOT execute tools.
-
-You only propose a tool request.
+Never execute a tool, approve an action, explain your decision, return
+Markdown, or include text outside the JSON object. Governance will validate
+your proposed request separately.
 
 Available tools:
 
-{tool_catalog}
+- faq_search: use for FAQs, refund policies, product/support information, and
+  general help questions. Arguments: {"query": "string"}.
 
-Return ONLY valid JSON.
+- send_email: use only when the user explicitly asks to send an email.
+  Arguments: {"recipient": "string", "message": "string"}.
 
-The JSON must have this structure:
+- customer_database: use only when the user asks for customer account or
+  customer-record information. Arguments: {"customer_id": "CUST-001"}.
 
-{{
-    "tool_name": "tool name",
-    "arguments": {{}}
-}}
+Return exactly one valid JSON object in this form:
+{"tool_name": "faq_search | send_email | customer_database | unknown", "arguments": {}}
 
-If none of the tools are appropriate,
-return:
-
-{{
-    "tool_name": "unknown",
-    "arguments": {{}}
-}}
+Use only the argument fields defined for the selected tool. If no tool applies,
+return {"tool_name": "unknown", "arguments": {}}.
 """
 
 
-def _tool_catalog() -> str:
-
-    entries = []
-
-    for index, tool in enumerate(TOOLS.values(), start=1):
-
-        arguments = ", ".join(
-            f'"{name}": "string"'
-            for name in tool.arguments
-        )
-
-        entries.append(
-            f"{index}. {tool.name}\n"
-            f"   Data source: {tool.data_source}\n"
-            f"   Action: {tool.action}\n"
-            f"   Arguments: {{{arguments}}}"
-        )
-
-    return "\n\n".join(entries)
-
-
-def llm_model() -> str:
-
-    return os.getenv("OPENAI_MODEL", DEFAULT_MODEL)
-
-
-def llm_enabled() -> bool:
-
-    return bool(os.getenv("OPENAI_API_KEY"))
-
-
-def _client() -> OpenAI:
-
+def decide_with_llm(
+    message: str,
+) -> ToolRequest:
     api_key = os.getenv("OPENAI_API_KEY")
-
     if not api_key:
-        raise RuntimeError(
-            "OPENAI_API_KEY is not configured"
+        raise RuntimeError("OPENAI_API_KEY is not configured")
+
+    client = OpenAI(api_key=api_key)
+    model = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+
+    try:
+        response = client.responses.create(
+            model=model,
+            instructions=SYSTEM_PROMPT,
+            input=message,
         )
-
-    return OpenAI(api_key=api_key)
-
-
-def decide_with_llm(message: str) -> ToolRequest:
-    """Ask the LLM to propose a tool request. The proposal is untrusted."""
-
-    response = _client().responses.create(
-        model=llm_model(),
-        instructions=SYSTEM_PROMPT.format(
-            tool_catalog=_tool_catalog()
-        ),
-        input=message,
-    )
+    except APIStatusError as error:
+        body = getattr(error, "body", None) or {}
+        code = getattr(error, "code", None) or body.get("code")
+        if error.status_code == 429 and code == "insufficient_quota":
+            raise LLMQuotaError(
+                "OpenAI API quota is unavailable. Add API billing or credits to the project that owns this key."
+            ) from error
+        raise LLMServiceError("The OpenAI decision service is currently unavailable") from error
 
     raw_output = response.output_text.strip()
 
@@ -133,3 +101,4 @@ def decide_with_llm(message: str) -> ToolRequest:
         tool_name=tool_name,
         arguments=arguments,
     )
+

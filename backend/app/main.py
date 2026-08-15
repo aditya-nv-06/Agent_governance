@@ -1,9 +1,11 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from .api import api_router
+from .database import engine
 from .startup import initialize_database
 
 
@@ -42,7 +44,10 @@ def root():
 
 @app.get("/health")
 def health():
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except Exception as error:
+        raise HTTPException(status_code=503, detail="Neon database is unavailable") from error
 
-    return {
-        "status": "healthy",
-    }
+    return {"status": "healthy", "database": "neon"}

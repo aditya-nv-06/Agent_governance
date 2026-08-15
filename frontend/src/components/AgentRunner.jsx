@@ -69,8 +69,23 @@ export default function AgentRunner({
       </h2>
 
       <p className="mt-1 text-sm text-white/50">
-        Test an agent request through the governance layer.
+        Enter a customer-support request. The agent proposes a tool; governance independently decides whether it may execute.
       </p>
+
+      <p className="mt-2 text-xs text-white/40">
+        Rule: approved profile scope → automatic execution. Outside scope → human approval required.
+      </p>
+
+      <div className="mt-4 grid gap-2 text-xs text-white/60 sm:grid-cols-2">
+        <button type="button" onClick={() => setMessage("What is the refund policy?")} className="border border-white/15 p-3 text-left hover:border-white/50">
+          <span className="block text-white">Allowed example</span>
+          Refund policy → faq_search → execute
+        </button>
+        <button type="button" onClick={() => setMessage("Get customer information")} className="border border-white/15 p-3 text-left hover:border-white/50">
+          <span className="block text-white">Approval example</span>
+          Customer information → blocked → review
+        </button>
+      </div>
 
 
       <textarea
@@ -80,7 +95,7 @@ export default function AgentRunner({
             event.target.value
           )
         }
-        placeholder="Ask the agent something..."
+        placeholder="Example: What is the refund policy?"
         className="mt-5 min-h-32 w-full border border-white/25 bg-black p-4 text-sm outline-none placeholder:text-white/30 focus:border-white"
       />
 
@@ -111,17 +126,17 @@ export default function AgentRunner({
 
         <div className="mt-5">
 
-          <div className="mb-2 text-sm font-medium text-white/50">
-            Execution Result
-          </div>
-
-          <pre className="overflow-auto border border-white/20 bg-black p-4 text-xs text-white/70">
-            {JSON.stringify(
-              result,
-              null,
-              2
+          <div className="border border-white/20 p-4 text-sm">
+            <p className="font-medium">
+              {result.status === "blocked" ? "Request blocked for review" : "Request completed"}
+            </p>
+            <p className="mt-1 text-white/60">
+              Tool: <span className="text-white">{result.tool}</span> · Governance: <span className="text-white">{result.governance || result.status}</span>
+            </p>
+            {result.status === "blocked" && (
+              <p className="mt-2 text-amber-100">Open Approvals below to approve or reject this request.</p>
             )}
-          </pre>
+          </div>
 
         </div>
 

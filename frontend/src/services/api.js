@@ -1,4 +1,47 @@
 const API_URL = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
+const ACTIVE_SESSION_KEY = "agent-governance-active-admin";
+const SESSION_KEY_PREFIX = "agent-governance-admin:";
+
+function getSessionKey(adminId) {
+  return adminId ? `${SESSION_KEY_PREFIX}${adminId}` : SESSION_KEY_PREFIX;
+}
+
+export function getSession() {
+  const activeAdminId = localStorage.getItem(ACTIVE_SESSION_KEY);
+  const activeKey = activeAdminId ? getSessionKey(activeAdminId) : null;
+
+  try {
+    if (activeKey) {
+      const activeSession = JSON.parse(localStorage.getItem(activeKey) || "null");
+      if (activeSession) {
+        return activeSession;
+      }
+    }
+
+    const legacySession = JSON.parse(localStorage.getItem(SESSION_KEY_PREFIX) || "null");
+    return legacySession;
+  } catch {
+    return null;
+  }
+}
+
+export function saveSession(session) {
+  const adminId = session?.admin?.id;
+  if (adminId) {
+    localStorage.setItem(getSessionKey(adminId), JSON.stringify(session));
+    localStorage.setItem(ACTIVE_SESSION_KEY, adminId);
+    return;
+  }
+
+  localStorage.setItem(SESSION_KEY_PREFIX, JSON.stringify(session));
+  localStorage.setItem(ACTIVE_SESSION_KEY, "legacy");
+}
+
+export function clearSession() {
+  const keys = Object.keys(localStorage).filter((key) => key.startsWith(SESSION_KEY_PREFIX) || key === "agent-governance-admin");
+  keys.forEach((key) => localStorage.removeItem(key));
+  localStorage.removeItem(ACTIVE_SESSION_KEY);
+}
 
 
 async function request(
@@ -12,6 +55,7 @@ async function request(
       ...options,
       headers: {
         "Content-Type": "application/json",
+        ...(getSession()?.access_token ? { Authorization: `Bearer ${getSession().access_token}` } : {}),
         ...options.headers,
       },
     }
@@ -19,15 +63,21 @@ async function request(
 
 
   if (!response.ok) {
-
-    const error =
-      await response.text();
-
+    const payload = await response.json().catch(() => null);
+    const error = payload?.detail || "Request failed. Please try again.";
     throw new Error(error);
   }
 
-
+  if (response.status === 204) return null;
   return response.json();
+}
+
+export function registerAdmin(payload) {
+  return request("/auth/register", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function loginAdmin(payload) {
+  return request("/auth/login", { method: "POST", body: JSON.stringify(payload) });
 }
 
 
@@ -37,8 +87,20 @@ export function getAgents() {
   return request("/agents");
 }
 
+export function createAgent(payload) {
+  return request("/agents", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function deleteAgent(agentId) {
+  return request(`/agents/${agentId}`, { method: "DELETE" });
+}
+
 export function getProfiles() {
   return request("/profiles");
+}
+
+export function createProfile(payload) {
+  return request(`/profiles`, { method: "POST", body: JSON.stringify(payload) });
 }
 
 

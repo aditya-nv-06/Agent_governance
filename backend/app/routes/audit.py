@@ -3,8 +3,9 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from ..database import get_db
+from ..auth import AdminUser, require_admin
 
-from ..models import AuditEvent
+from ..models import Agent, AuditEvent
 
 
 router = APIRouter(
@@ -16,10 +17,13 @@ router = APIRouter(
 @router.get("")
 def get_audit_events(
     db: Session = Depends(get_db),
+    admin: AdminUser = Depends(require_admin),
 ):
 
     events = (
         db.query(AuditEvent)
+        .join(Agent, AuditEvent.agent_id == Agent.id)
+        .filter(Agent.owner_id == admin.id)
         .order_by(
             AuditEvent.created_at.desc()
         )
@@ -47,3 +51,8 @@ def get_audit_events(
         }
         for event in events
     ]
+
+
+@router.get("/events", include_in_schema=False)
+def get_audit_event_alias(db: Session = Depends(get_db)):
+    return get_audit_events(db)

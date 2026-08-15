@@ -3,9 +3,44 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+class AgentProfileCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+
+    allowed_tools: list[str] = Field(default_factory=list)
+    allowed_data_sources: list[str] = Field(default_factory=list)
+    allowed_actions: list[str] = Field(default_factory=list)
+
+    max_llm_calls: int = Field(default=1000, gt=0)
+    warning_threshold: int = Field(default=80, ge=1, le=100)
+    critical_threshold: int = Field(default=90, ge=1, le=100)
+
+
 class AgentCreate(BaseModel):
-    name: str = Field(min_length =1,max_length=100)
+    name: str = Field(min_length=1, max_length=100)
     description: str | None = None
+    profile: AgentProfileCreate | None = None
+
+
+class AdminRegisterRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=8, max_length=128)
+
+
+class AdminLoginRequest(AdminRegisterRequest):
+    pass
+
+
+class AdminResponse(BaseModel):
+    id: uuid.UUID
+    email: str
+    role: str
+    model_config = {"from_attributes": True}
+
+
+class AuthResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    admin: AdminResponse
 
 class AgentResponse(BaseModel):
     id: uuid.UUID

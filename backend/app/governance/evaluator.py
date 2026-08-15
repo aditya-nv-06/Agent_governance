@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
+from ..agent.tools import get_tool
 from ..models import Agent, AgentRun, BehaviorProfile
 
 
@@ -26,18 +27,7 @@ class PolicyDecision:
 
     warning: str | None = None
 
-    requires_approval: bool = False
-
-    @property
-    def status(self) -> str:
-
-        if not self.allowed:
-            return BLOCK
-
-        if self.requires_approval:
-            return REQUIRE_APPROVAL
-
-        return ALLOW
+    finding_type: str = "UNAUTHORIZED_TOOL"
 
 
 class PolicyEvaluator:
@@ -55,6 +45,20 @@ class PolicyEvaluator:
         action: str | None = None,
         requires_approval: bool = False,
     ) -> PolicyDecision:
+
+        # A request for an unregistered tool must be governed as a policy
+        # violation, not allowed to turn into an application error later.
+        tool = get_tool(tool_name)
+        if not tool:
+            return PolicyDecision(
+                allowed=False,
+                reason=f"Tool '{tool_name}' is not registered",
+                severity="CRITICAL",
+                finding_type="UNKNOWN_TOOL",
+            )
+
+        data_source = data_source or tool.data_source
+        action = action or tool.action
 
         # -----------------------------------------
         # 1. Find agent

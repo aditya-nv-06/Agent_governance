@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <defs><style>
+    .title { font: 700 38px Arial, sans-serif; fill: #0f172a; }
+    .box { fill: #fff; stroke: #334155; stroke-width: 3; rx: 16; }
+    .governance { fill: #eef2ff; stroke: #4f46e5; stroke-width: 4; rx: 20; }
+    .outcome { fill: #ecfdf5; stroke: #059669; stroke-width: 3; rx: 14; }
+    .block { fill: #fff1f2; stroke: #e11d48; stroke-width: 3; rx: 14; }
+    .text { font: 600 25px Arial, sans-serif; fill: #172033; text-anchor: middle; }
+    .small { font: 20px Arial, sans-serif; fill: #334155; text-anchor: middle; }
+    .arrow { stroke: #475569; stroke-width: 4; fill: none; marker-end: url(#arrow); }
+  </style><marker id="arrow" markerWidth="12" markerHeight="12" refX="9" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#475569"/></marker></defs>
+  <rect width="1600" height="900" fill="#f8fafc"/>
+  <text x="800" y="65" class="title" text-anchor="middle">AI Agent Governance Platform — Runtime Architecture</text>
+  <rect class="box" x="610" y="105" width="380" height="86"/><text class="text" x="800" y="158">User request</text>
+  <path class="arrow" d="M800 191 V235"/>
+  <rect class="box" x="610" y="235" width="380" height="105"/><text class="text" x="800" y="280">LLM / Decision layer</text><text class="small" x="800" y="315">proposes ToolRequest + arguments</text>
+  <path class="arrow" d="M800 340 V390"/>
+  <rect class="governance" x="430" y="390" width="740" height="225"/><text class="text" x="800" y="440">Governance Gateway</text>
+  <rect class="box" x="470" y="480" width="145" height="90"/><text class="small" x="542" y="520">Tool</text><text class="small" x="542" y="548">check</text>
+  <rect class="box" x="645" y="480" width="145" height="90"/><text class="small" x="717" y="520">Data</text><text class="small" x="717" y="548">check</text>
+  <rect class="box" x="820" y="480" width="145" height="90"/><text class="small" x="892" y="520">Action</text><text class="small" x="892" y="548">check</text>
+  <rect class="box" x="995" y="480" width="135" height="90"/><text class="small" x="1062" y="520">Usage</text><text class="small" x="1062" y="548">limits</text>
+  <path class="arrow" d="M800 615 V670 M800 670 H350 V715 M800 670 H800 V715 M800 670 H1250 V715"/>
+  <rect class="outcome" x="185" y="715" width="330" height="95"/><text class="text" x="350" y="757">ALLOW</text><text class="small" x="350" y="787">execute registered tool</text>
+  <rect class="block" x="635" y="715" width="330" height="95"/><text class="text" x="800" y="757">BLOCK</text><text class="small" x="800" y="787">finding + response action</text>
+  <rect class="box" x="1085" y="715" width="330" height="95"/><text class="text" x="1250" y="757">APPROVAL</text><text class="small" x="1250" y="787">human review, then safe execution</text>
+  <path class="arrow" d="M350 810 V830 H800 M800 810 V830 M1250 810 V830 H800"/>
+  <rect class="box" x="540" y="840" width="520" height="48"/><text class="text" x="800" y="873">PostgreSQL + React audit dashboard</text>
+</svg>

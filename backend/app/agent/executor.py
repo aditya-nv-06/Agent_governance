@@ -17,7 +17,9 @@ def execute_tool(
 
     try:
 
-        result = tool.function(**arguments)
+        result = tool.function(
+            **arguments
+        )
 
     except TypeError as error:
 
@@ -27,3 +29,4 @@ def execute_tool(
         )
 
     return result
+

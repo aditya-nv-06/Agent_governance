@@ -10,7 +10,7 @@ from ..database import get_db
 from ..governance.approval import ApprovalService
 from ..governance.audit import AuditService
 from ..agent.service import AgentService
-from ..models import Agent, AgentRun, Approval, ExecutionEvent, Finding, ResponseAction
+from ..models import Agent, Approval, ExecutionEvent, Finding, ResponseAction
 
 from ..schemas import (
     ApprovalDecisionRequest,
@@ -35,6 +35,7 @@ def get_approvals(
 
     return (
         db.query(Approval)
+        .filter(Approval.status.in_(["PENDING", "APPROVED"]))
         .order_by(
             Approval.created_at.desc()
         )
@@ -103,7 +104,15 @@ def _decide(
     approval = ApprovalService(db).decide(approval_id, approved, decided_by, reason)
     finding = db.get(Finding, approval.finding_id)
     if finding:
-        finding.status = "approved" if approved else "rejected"
+        finding.status = "approved" if payload.approved else "rejected"
+        response_action = (
+            db.query(ResponseAction)
+            .filter(ResponseAction.finding_id == finding.id)
+            .order_by(ResponseAction.id.desc())
+            .first()
+        )
+        if response_action:
+            response_action.status = "APPROVED" if payload.approved else "REJECTED"
         agent = db.get(Agent, finding.agent_id)
         if agent and approved:
             agent.status = "active"
@@ -150,6 +159,8 @@ def execute_approved_action(
     approval = db.get(Approval, approval_id)
     if not approval:
         raise HTTPException(status_code=404, detail="Approval not found")
+    if approval.status == "EXECUTED":
+        raise HTTPException(status_code=409, detail="Approved action has already executed")
     if approval.status != "APPROVED":
         raise HTTPException(
             status_code=403,
@@ -163,7 +174,7 @@ def execute_approved_action(
         db.query(ExecutionEvent)
         .filter(
             ExecutionEvent.run_id == finding.run_id,
-            ExecutionEvent.event_type == "APPROVED_TOOL_EXECUTED",
+            ExecutionEvent.event_type == "APPROVED_TOOL_EXECUTION",
         )
         .first()
     )
@@ -171,7 +182,7 @@ def execute_approved_action(
         raise HTTPException(status_code=409, detail="Approved action has already executed")
 
     try:
-        return AgentService(db).execute_approved_action(
+        result = AgentService(db).execute_approved_action(
             agent_id=finding.agent_id,
             run_id=finding.run_id,
             tool_name=finding.actual,
@@ -179,5 +190,17 @@ def execute_approved_action(
             approval_id=approval.id,
             finding_id=finding.id,
         )
+        approval.status = "EXECUTED"
+        finding.status = "executed"
+        response_action = (
+            db.query(ResponseAction)
+            .filter(ResponseAction.finding_id == finding.id)
+            .order_by(ResponseAction.id.desc())
+            .first()
+        )
+        if response_action:
+            response_action.status = "EXECUTED"
+        db.commit()
+        return result
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error

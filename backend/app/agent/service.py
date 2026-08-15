@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
@@ -5,6 +6,9 @@ from sqlalchemy.orm import Session
 from ..models import (
     Agent,
     AgentRun,
+    Finding,
+    Approval,
+    ResponseAction,
     ExecutionEvent,
     ResponseAction,
 )
@@ -19,9 +23,9 @@ from ..governance.persistence import (
     create_response_action,
 )
 
-from .decision import default_arguments
+from .decision import ToolRequest, decide_tool_request
 from .executor import execute_tool
-from .runtime import propose_tool_request
+from .llm import LLMQuotaError, LLMServiceError, decide_with_llm
 from .tools import get_tool
 
 
@@ -39,7 +43,14 @@ class AgentService:
     # -----------------------------------------
 
     def choose_tool(self, message: str) -> str:
-        return propose_tool_request(message).tool_request.tool_name
+        return self._choose_tool_request(message).tool_name
+
+    @staticmethod
+    def _choose_tool_request(message: str) -> ToolRequest:
+        """Use the LLM decision layer unless explicitly disabled for tests."""
+        if os.getenv("USE_LLM_DECISIONS", "true").lower() in {"0", "false", "no"}:
+            return decide_tool_request(message)
+        return decide_with_llm(message)
 
     # -----------------------------------------
     # Execute agent run
@@ -65,26 +76,28 @@ class AgentService:
                 "Agent not found"
             )
 
-        proposal = propose_tool_request(message)
-        tool_request = proposal.tool_request
+        fallback_reason = None
+        try:
+            tool_request = self._choose_tool_request(message)
+        except (LLMQuotaError, LLMServiceError) as error:
+            # Keep the governed demo available when the external decision
+            # provider is unavailable. This never bypasses policy checks.
+            tool_request = decide_tool_request(message)
+            fallback_reason = str(error)
         tool_name = tool_request.tool_name
         tool = get_tool(tool_name)
 
-        # The proposal is recorded before governance runs, so an approved
-        # action can later replay exactly what the LLM asked for.
-        create_execution_event(
-            db=self.db,
-            run_id=run_id,
-            agent_id=agent.id,
-            event_type=TOOL_REQUEST_EVENT,
-            tool_name=tool_name,
-            status="REQUESTED",
-            details={
-                "message": message,
-                "arguments": tool_request.arguments,
-                "decided_by": proposal.source,
-                "model": proposal.model,
-            },
+        # -------------------------------------
+        # Governance check
+        # -------------------------------------
+
+        decision = (
+            self.gateway.authorize_tool(
+                agent_id=agent_id,
+                tool_name=tool_name,
+                data_source=tool.data_source if tool else None,
+                action=tool.action if tool else None,
+            )
         )
 
         create_audit_event(
@@ -95,29 +108,33 @@ class AgentService:
             actor="agent",
             details={
                 "tool": tool_name,
-                "arguments": tool_request.arguments,
                 "data_source": tool.data_source if tool else None,
                 "action": tool.action if tool else None,
-                "decided_by": proposal.source,
-                "model": proposal.model,
             },
-        )
-
-        # -------------------------------------
-        # Governance check
-        # -------------------------------------
-
-        decision = self.gateway.evaluate(
-            agent_id=agent_id,
+        ))
+        self.db.add(ExecutionEvent(
             run_id=run_id,
-            tool_request=tool_request,
-        )
-
-        if decision.warning:
-            create_audit_event(
-                db=self.db,
+            agent_id=agent.id,
+            event_type="LLM_TOOL_REQUEST",
+            tool_name=tool_name,
+            status="REQUESTED",
+            details={"arguments": tool_request.arguments},
+        ))
+        if fallback_reason:
+            self.db.add(AuditEvent(
                 agent_id=agent.id,
                 run_id=run_id,
+                finding_id=None,
+                event_type="LLM_DECISION_FALLBACK",
+                actor="governance",
+                details={"reason": fallback_reason, "tool": tool_name},
+            ))
+
+        if decision.warning:
+            self.db.add(AuditEvent(
+                agent_id=agent.id,
+                run_id=run_id,
+                finding_id=None,
                 event_type="WARNING_TRIGGERED",
                 actor="governance",
                 details={"level": decision.warning, "reason": decision.reason},
@@ -156,7 +173,15 @@ class AgentService:
             event_type="TOOL_ALLOWED",
             actor="governance",
             details={"tool": tool_name},
-        )
+        ))
+        self.db.add(ExecutionEvent(
+            run_id=run_id,
+            agent_id=agent.id,
+            event_type="TOOL_ALLOWED",
+            tool_name=tool_name,
+            status="ALLOWED",
+            details={},
+        ))
 
         # -------------------------------------
         # ALLOW
@@ -186,7 +211,9 @@ class AgentService:
             db=self.db,
             agent_id=agent.id,
             run_id=run_id,
-            tool_name=tool_name,
+
+            finding_type=decision.finding_type,
+
             severity=decision.severity,
             reason=decision.reason,
             expected=", ".join(decision.expected_tools),
@@ -198,10 +225,23 @@ class AgentService:
             action_type="BLOCK",
             status="EXECUTED",
             reason=decision.reason,
+
+            status="open",
         )
 
-        approval = create_approval(
-            db=self.db,
+        self.db.add(finding)
+
+        self.db.flush()
+
+        self.db.add(ResponseAction(
+            finding_id=finding.id,
+            action_type="REQUIRE_APPROVAL",
+            status="PENDING",
+            reason=decision.reason,
+        ))
+
+        # Approval
+        approval = Approval(
             finding_id=finding.id,
             requested_by="agent",
         )
@@ -243,7 +283,9 @@ class AgentService:
             agent_id=agent.id,
             run_id=run_id,
             finding_id=finding.id,
-            event_type="GOVERNANCE_BLOCK",
+
+            event_type="TOOL_BLOCKED",
+
             actor="governance",
             details={
                 "tool": tool_name,
@@ -265,9 +307,7 @@ class AgentService:
             run.status = "blocked"
             run.completed_at = datetime.now(timezone.utc)
 
-        agent.status = "blocked"
-        create_audit_event(
-            db=self.db,
+        self.db.add(AuditEvent(
             agent_id=agent.id,
             run_id=run_id,
             finding_id=finding.id,
@@ -427,7 +467,11 @@ class AgentService:
             db=self.db,
             agent_id=agent.id,
             run_id=run_id,
-            event_type="TOOL_EXECUTION",
+
+            finding_id=None,
+
+            event_type="TOOL_EXECUTED",
+
             actor="agent",
             details={
                 "tool": tool_name,
@@ -483,22 +527,41 @@ class AgentService:
         tool_name: str,
         approved_by: str,
         approval_id,
-        finding_id=None,
+        finding_id,
     ):
-        """Execute only the tool captured in an approved finding."""
+        """Execute the original request after a human has approved it."""
         agent = self.db.get(Agent, agent_id)
         run = self.db.get(AgentRun, run_id)
         if not agent or not run:
             raise ValueError("Agent run not found")
 
-        arguments = self._requested_arguments(run.id, tool_name)
-        result = self._invoke_tool(tool_name, run.input_message, arguments)
-        create_execution_event(
-            db=self.db,
+        # Recover the exact recorded request. Never accept fresh arguments or
+        # ask the LLM to make a second decision after human approval.
+        original_request = (
+            self.db.query(ExecutionEvent)
+            .filter(
+                ExecutionEvent.run_id == run.id,
+                ExecutionEvent.event_type == "LLM_TOOL_REQUEST",
+            )
+            .first()
+        )
+        if not original_request:
+            raise ValueError("Original tool request was not recorded")
+        request = ToolRequest(
+            tool_name=original_request.tool_name or "",
+            arguments=original_request.details.get("arguments", {}),
+        )
+        if request.tool_name != tool_name:
+            raise ValueError("Approved tool does not match the original request")
+        if not get_tool(request.tool_name):
+            raise ValueError(f"Tool '{request.tool_name}' does not exist")
+
+        result = self._execute_request(request.tool_name, request.arguments)
+        self.db.add(ExecutionEvent(
             run_id=run.id,
             agent_id=agent.id,
-            event_type="APPROVED_TOOL_EXECUTED",
-            tool_name=tool_name,
+            event_type="APPROVED_TOOL_EXECUTION",
+            tool_name=request.tool_name,
             status="SUCCESS",
             details={
                 "approval_id": str(approval_id),
@@ -510,55 +573,23 @@ class AgentService:
             db=self.db,
             agent_id=agent.id,
             run_id=run.id,
+            finding_id=finding_id,
             event_type="APPROVED_ACTION_EXECUTED",
             actor=approved_by,
-            details={"approval_id": str(approval_id), "tool": tool_name},
-        )
-        if finding_id:
-            for action in (
-                self.db.query(ResponseAction)
-                .filter(
-                    ResponseAction.finding_id == finding_id,
-                    ResponseAction.status == "PENDING",
-                )
-                .all()
-            ):
-                action.status = "EXECUTED"
-
+            details={"approval_id": str(approval_id), "tool": request.tool_name},
+        ))
         run.status = "completed"
         run.completed_at = datetime.now(timezone.utc)
         self.db.commit()
-        return {
-            "status": "completed",
-            "tool": tool_name,
-            "arguments": arguments,
-            "result": result,
-        }
-
-    def _requested_arguments(self, run_id, tool_name: str) -> dict | None:
-        """Recover the arguments the agent originally proposed for this run."""
-
-        event = (
-            self.db.query(ExecutionEvent)
-            .filter(
-                ExecutionEvent.run_id == run_id,
-                ExecutionEvent.event_type == TOOL_REQUEST_EVENT,
-                ExecutionEvent.tool_name == tool_name,
-            )
-            .order_by(ExecutionEvent.created_at.desc())
-            .first()
-        )
-
-        if not event:
-            return None
-
-        arguments = (event.details or {}).get("arguments")
-
-        return arguments if isinstance(arguments, dict) else None
+        return {"status": "completed", "tool": request.tool_name, "result": result}
 
     @staticmethod
-    def _invoke_tool(tool_name: str, message: str, arguments: dict | None = None):
-        return execute_tool(
-            tool_name=tool_name,
-            arguments=arguments if arguments else default_arguments(tool_name, message),
-        )
+    def _invoke_tool(tool_name: str, message: str):
+        request = decide_tool_request(message)
+        if request.tool_name != tool_name:
+            raise ValueError("Tool does not match the original request")
+        return AgentService._execute_request(tool_name, request.arguments)
+
+    @staticmethod
+    def _execute_request(tool_name: str, arguments: dict):
+        return execute_tool(tool_name, arguments)
