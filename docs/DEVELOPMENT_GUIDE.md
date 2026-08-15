@@ -1,15 +1,18 @@
 # Development Guide
 
-This guide is meant for contributors working on the governance platform locally or in CI.
+This guide helps contributors set up and work on the project locally.
 
-## Local prerequisites
+Prerequisites
+-------------
 
 - Python 3.11+
 - Node.js 18+
-- PostgreSQL 15+ for local full-stack integration
-- A browser for the React dashboard
+- PostgreSQL (recommended) or SQLite for lightweight testing
 
-## Backend setup
+Backend setup
+-------------
+
+1. Create and activate a virtual environment, then install dependencies:
 
 ```bash
 cd backend
@@ -18,38 +21,35 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Create a `.env` file in `backend/` with values such as:
+2. Create `backend/.env` (example):
 
 ```bash
 DATABASE_URL=postgresql+psycopg://USER:PASSWORD@localhost:5432/agent_governance
 AUTH_SECRET=super-secret-value
 OPENAI_API_KEY=your-key-if-live-decisions-are-enabled
+# Optional for allowing SQLite in tests
 ALLOW_SQLITE_FOR_TESTS=true
 ```
 
-For tests, SQLite is allowed explicitly when the environment variable is set.
-
-## Seed the demo data
+3. Seed demo data (optional):
 
 ```bash
-cd backend
 source .venv/bin/activate
 python seed.py
 ```
 
-This ensures the admin `adityanv4@gmail.com` is available with a demo agent and behavior profile.
-
-## Run the API
+4. Run the API for development:
 
 ```bash
-cd backend
-source .venv/bin/activate
 uvicorn app.main:app --reload --port 8000
 ```
 
-Swagger UI is available at http://127.0.0.1:8000/docs.
+Open the interactive docs at `http://127.0.0.1:8000/docs`.
 
-## Frontend setup
+Frontend setup
+--------------
+
+1. Install and run the Vite dev server:
 
 ```bash
 cd frontend
@@ -57,9 +57,12 @@ npm install
 npm run dev
 ```
 
-The Vite app uses a proxy for `/api` requests to the FastAPI service.
+2. The frontend proxies `/api` to the backend in dev mode. If your backend is on a different host/port, set `VITE_API_URL` in your environment.
 
-## Validation commands
+Testing and validation
+----------------------
+
+Backend unit tests:
 
 ```bash
 cd backend
@@ -67,18 +70,30 @@ source .venv/bin/activate
 python -m unittest discover -s tests -v
 ```
 
+Frontend build check:
+
 ```bash
 cd frontend
 npm run build
 ```
 
-## Required behavior rules
+Key development notes
+---------------------
 
-- Agents must include a profile at creation time.
-- The profile is stored as a `BehaviorProfile` record linked to the agent.
-- Agents are owner-scoped to the logged-in admin.
-- Delete operations remove related findings, runs, audit records, profiles, and the agent itself.
+- Agent creation: the backend requires a `profile` payload when creating an agent. The frontend `Agents` form submits a `profile` object alongside the agent; review `frontend/src/components/Agents.jsx` if you change the UI.
+- Sessions: the frontend stores per-admin sessions in `localStorage` under `agent-governance-admin:<adminId>` and the active admin id under `agent-governance-active-admin`. Clearing sessions is handled by the Sign out action in the UI.
+- Deleting an agent: the DELETE API removes approvals, findings, runs, audit events, and the behavior profile before deleting the agent row. Ownership is enforced—only the admin who owns the agent may delete it.
 
-## CI expectations
+Debugging tips
+--------------
 
-GitHub Actions runs backend tests and frontend build validation on pull requests and pushes.
+- If agent creation returns a validation error, ensure the JSON body contains the `profile` object (name + allowed lists + thresholds).
+- For authorization failures, inspect the request `Authorization` header in your browser devtools Network tab to ensure the `access_token` is present.
+- Backend logs: when running with `uvicorn`, errors and traceback appear in the terminal. The backend also logs agent deletion attempts and failures.
+
+CI
+--
+
+CI workflows validate backend tests and frontend builds in `.github/workflows/`.
+
+If you want, I can also add a short CONTRIBUTING.md with a checklist for PRs and local pre-commit hooks.
