@@ -5,10 +5,9 @@ def execute_tool(
     tool_name: str,
     arguments: dict,
 ):
+    """Execute a registered tool. Only governance may reach this function."""
 
-    tool = get_tool(
-        tool_name
-    )
+    tool = get_tool(tool_name)
 
     if not tool:
 
@@ -18,9 +17,7 @@ def execute_tool(
 
     try:
 
-        result = tool(
-            **arguments
-        )
+        result = tool.function(**arguments)
 
     except TypeError as error:
 

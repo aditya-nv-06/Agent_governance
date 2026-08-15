@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -9,9 +10,13 @@ from ..database import get_db
 from ..governance.approval import ApprovalService
 from ..governance.audit import AuditService
 from ..agent.service import AgentService
-from ..models import Agent, Approval, ExecutionEvent, Finding
+from ..models import Agent, AgentRun, Approval, ExecutionEvent, Finding, ResponseAction
 
-from ..schemas import ApprovalDecisionRequest, ApprovalResponse
+from ..schemas import (
+    ApprovalDecisionRequest,
+    ApprovalResponse,
+    ApprovalReviewRequest,
+)
 
 
 router = APIRouter(
@@ -37,11 +42,57 @@ def get_approvals(
     )
 
 
+@router.post("/{approval_id}/approve", response_model=ApprovalResponse)
+def approve(
+    approval_id: uuid.UUID,
+    payload: ApprovalReviewRequest,
+    db: Session = Depends(get_db),
+):
+    return _decide(
+        approval_id=approval_id,
+        approved=True,
+        decided_by=payload.decided_by,
+        reason=payload.decision_reason,
+        db=db,
+    )
+
+
+@router.post("/{approval_id}/reject", response_model=ApprovalResponse)
+def reject(
+    approval_id: uuid.UUID,
+    payload: ApprovalReviewRequest,
+    db: Session = Depends(get_db),
+):
+    return _decide(
+        approval_id=approval_id,
+        approved=False,
+        decided_by=payload.decided_by,
+        reason=payload.decision_reason,
+        db=db,
+    )
+
+
 @router.post("/{approval_id}/decision", response_model=ApprovalResponse)
 def decide_approval(
     approval_id: uuid.UUID,
     payload: ApprovalDecisionRequest,
     db: Session = Depends(get_db),
+):
+    return _decide(
+        approval_id=approval_id,
+        approved=payload.approved,
+        decided_by=payload.decided_by,
+        reason=payload.reason,
+        db=db,
+    )
+
+
+def _decide(
+    approval_id: uuid.UUID,
+    approved: bool,
+    decided_by: str,
+    reason: str,
+    db: Session,
 ):
     approval = db.get(Approval, approval_id)
     if not approval:
@@ -49,31 +100,43 @@ def decide_approval(
     if approval.status != "PENDING":
         raise HTTPException(status_code=409, detail="Approval has already been decided")
 
-    approval = ApprovalService(db).decide(
-        approval_id, payload.approved, payload.decided_by, payload.reason
-    )
+    approval = ApprovalService(db).decide(approval_id, approved, decided_by, reason)
     finding = db.get(Finding, approval.finding_id)
     if finding:
-        finding.status = "resolved" if payload.approved else "blocked"
+        finding.status = "approved" if approved else "rejected"
         agent = db.get(Agent, finding.agent_id)
-        if agent and payload.approved:
+        if agent and approved:
             agent.status = "active"
+        run = db.get(AgentRun, finding.run_id)
+        if not approved:
+            if run:
+                run.status = "blocked"
+                run.completed_at = datetime.now(timezone.utc)
+            for action in (
+                db.query(ResponseAction)
+                .filter(
+                    ResponseAction.finding_id == finding.id,
+                    ResponseAction.status == "PENDING",
+                )
+                .all()
+            ):
+                action.status = "REJECTED"
         db.commit()
         AuditService(db).record(
             agent_id=finding.agent_id,
             run_id=finding.run_id,
             finding_id=finding.id,
-            event_type="APPROVAL_GRANTED" if payload.approved else "APPROVAL_REJECTED",
-            actor=payload.decided_by,
-            details={"reason": payload.reason, "approval_id": str(approval.id)},
+            event_type="APPROVAL_GRANTED" if approved else "APPROVAL_REJECTED",
+            actor=decided_by,
+            details={"reason": reason, "approval_id": str(approval.id)},
         )
-        if payload.approved:
+        if approved:
             AuditService(db).record(
                 agent_id=finding.agent_id,
                 run_id=finding.run_id,
                 finding_id=finding.id,
                 event_type="AGENT_RESUMED",
-                actor=payload.decided_by,
+                actor=decided_by,
                 details={"approval_id": str(approval.id)},
             )
     return approval
@@ -114,6 +177,7 @@ def execute_approved_action(
             tool_name=finding.actual,
             approved_by=approval.decided_by or "reviewer",
             approval_id=approval.id,
+            finding_id=finding.id,
         )
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error

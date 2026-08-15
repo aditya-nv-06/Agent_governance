@@ -6,6 +6,11 @@ from sqlalchemy.orm import Session
 from ..models import Agent, AgentRun, BehaviorProfile
 
 
+ALLOW = "ALLOW"
+BLOCK = "BLOCK"
+REQUIRE_APPROVAL = "REQUIRE_APPROVAL"
+
+
 @dataclass
 class PolicyDecision:
 
@@ -21,6 +26,19 @@ class PolicyDecision:
 
     warning: str | None = None
 
+    requires_approval: bool = False
+
+    @property
+    def status(self) -> str:
+
+        if not self.allowed:
+            return BLOCK
+
+        if self.requires_approval:
+            return REQUIRE_APPROVAL
+
+        return ALLOW
+
 
 class PolicyEvaluator:
 
@@ -35,6 +53,7 @@ class PolicyEvaluator:
         tool_name: str,
         data_source: str | None = None,
         action: str | None = None,
+        requires_approval: bool = False,
     ) -> PolicyDecision:
 
         # -----------------------------------------
@@ -172,12 +191,14 @@ class PolicyEvaluator:
             allowed=True,
 
             reason=(
-                "Tool is authorized "
-                "by behavior profile"
+                "High-risk action requires human approval"
+                if requires_approval
+                else "Tool is authorized by behavior profile"
             ),
 
-            severity="NONE",
+            severity="HIGH" if requires_approval else "NONE",
 
             expected_tools=allowed_tools,
             warning=warning,
+            requires_approval=requires_approval,
         )

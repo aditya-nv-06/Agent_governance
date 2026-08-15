@@ -5,16 +5,27 @@ from sqlalchemy.orm import Session
 from ..models import (
     Agent,
     AgentRun,
-    Finding,
-    Approval,
     ExecutionEvent,
-    AuditEvent,
+    ResponseAction,
 )
 
 from ..governance.gateway import GovernanceGateway
+from ..governance.evaluator import BLOCK, REQUIRE_APPROVAL
+from ..governance.persistence import (
+    create_approval,
+    create_audit_event,
+    create_execution_event,
+    create_finding,
+    create_response_action,
+)
 
-from .decision import decide_tool_request
+from .decision import default_arguments
+from .executor import execute_tool
+from .runtime import propose_tool_request
 from .tools import get_tool
+
+
+TOOL_REQUEST_EVENT = "LLM_TOOL_REQUEST"
 
 
 class AgentService:
@@ -28,7 +39,7 @@ class AgentService:
     # -----------------------------------------
 
     def choose_tool(self, message: str) -> str:
-        return decide_tool_request(message).tool_name
+        return propose_tool_request(message).tool_request.tool_name
 
     # -----------------------------------------
     # Execute agent run
@@ -54,53 +65,69 @@ class AgentService:
                 "Agent not found"
             )
 
-        tool_request = decide_tool_request(message)
+        proposal = propose_tool_request(message)
+        tool_request = proposal.tool_request
         tool_name = tool_request.tool_name
         tool = get_tool(tool_name)
-        if not tool:
-            raise ValueError(f"Tool '{tool_name}' does not exist")
+
+        # The proposal is recorded before governance runs, so an approved
+        # action can later replay exactly what the LLM asked for.
+        create_execution_event(
+            db=self.db,
+            run_id=run_id,
+            agent_id=agent.id,
+            event_type=TOOL_REQUEST_EVENT,
+            tool_name=tool_name,
+            status="REQUESTED",
+            details={
+                "message": message,
+                "arguments": tool_request.arguments,
+                "decided_by": proposal.source,
+                "model": proposal.model,
+            },
+        )
+
+        create_audit_event(
+            db=self.db,
+            agent_id=agent.id,
+            run_id=run_id,
+            event_type="TOOL_REQUESTED",
+            actor="agent",
+            details={
+                "tool": tool_name,
+                "arguments": tool_request.arguments,
+                "data_source": tool.data_source if tool else None,
+                "action": tool.action if tool else None,
+                "decided_by": proposal.source,
+                "model": proposal.model,
+            },
+        )
 
         # -------------------------------------
         # Governance check
         # -------------------------------------
 
-        decision = (
-            self.gateway.authorize_tool(
-                agent_id=agent_id,
-                tool_name=tool_name,
-                data_source=tool.data_source,
-                action=tool.action,
-            )
+        decision = self.gateway.evaluate(
+            agent_id=agent_id,
+            run_id=run_id,
+            tool_request=tool_request,
         )
 
-        self.db.add(AuditEvent(
-            agent_id=agent.id,
-            run_id=run_id,
-            finding_id=None,
-            event_type="TOOL_REQUESTED",
-            actor="agent",
-            details={
-                "tool": tool_name,
-                "data_source": tool.data_source,
-                "action": tool.action,
-            },
-        ))
-
         if decision.warning:
-            self.db.add(AuditEvent(
+            create_audit_event(
+                db=self.db,
                 agent_id=agent.id,
                 run_id=run_id,
-                finding_id=None,
                 event_type="WARNING_TRIGGERED",
                 actor="governance",
                 details={"level": decision.warning, "reason": decision.reason},
-            ))
+            )
 
         # -------------------------------------
         # BLOCK
         # -------------------------------------
 
-        if not decision.allowed:
+        if decision.status == BLOCK:
 
             return self.block_action(
                 agent=agent,
@@ -109,14 +136,27 @@ class AgentService:
                 decision=decision,
             )
 
-        self.db.add(AuditEvent(
+        # -------------------------------------
+        # REQUIRE APPROVAL
+        # -------------------------------------
+
+        if decision.status == REQUIRE_APPROVAL:
+
+            return self.request_approval(
+                agent=agent,
+                run_id=run_id,
+                tool_request=tool_request,
+                decision=decision,
+            )
+
+        create_audit_event(
+            db=self.db,
             agent_id=agent.id,
             run_id=run_id,
-            finding_id=None,
             event_type="TOOL_ALLOWED",
             actor="governance",
             details={"tool": tool_name},
-        ))
+        )
 
         # -------------------------------------
         # ALLOW
@@ -127,6 +167,7 @@ class AgentService:
             run_id=run_id,
             tool_name=tool_name,
             message=message,
+            arguments=tool_request.arguments,
         )
 
     # -----------------------------------------
@@ -141,103 +182,75 @@ class AgentService:
         decision,
     ):
 
-        # Finding
-        finding = Finding(
+        finding = create_finding(
+            db=self.db,
             agent_id=agent.id,
             run_id=run_id,
-
-            finding_type="UNAUTHORIZED_TOOL",
-
+            tool_name=tool_name,
             severity=decision.severity,
-
-            expected=", ".join(
-                decision.expected_tools
-            ),
-
-            actual=tool_name,
-
             reason=decision.reason,
-
-            status="open",
+            expected=", ".join(decision.expected_tools),
         )
 
-        self.db.add(finding)
-
-        self.db.flush()
-
-        # Approval
-        approval = Approval(
+        create_response_action(
+            db=self.db,
             finding_id=finding.id,
-
-            status="PENDING",
-
-            requested_by="agent",
-
-            decided_by=None,
-
-            decision_reason=None,
+            action_type="BLOCK",
+            status="EXECUTED",
+            reason=decision.reason,
         )
 
-        self.db.add(approval)
-        self.db.flush()
+        approval = create_approval(
+            db=self.db,
+            finding_id=finding.id,
+            requested_by="agent",
+        )
 
-        self.db.add(AuditEvent(
+        create_audit_event(
+            db=self.db,
             agent_id=agent.id,
             run_id=run_id,
             finding_id=finding.id,
             event_type="FINDING_CREATED",
             actor="governance",
             details={"finding_type": finding.finding_type, "severity": finding.severity},
-        ))
-        self.db.add(AuditEvent(
+        )
+        create_audit_event(
+            db=self.db,
             agent_id=agent.id,
             run_id=run_id,
             finding_id=finding.id,
             event_type="APPROVAL_REQUESTED",
             actor="governance",
             details={"approval_id": str(approval.id)},
-        ))
+        )
 
-        # Execution event
-        execution_event = ExecutionEvent(
+        create_execution_event(
+            db=self.db,
             run_id=run_id,
-
             agent_id=agent.id,
-
             event_type="TOOL_BLOCKED",
-
             tool_name=tool_name,
-
             status="BLOCKED",
-
             details={
                 "reason": decision.reason,
                 "severity": decision.severity,
             },
         )
 
-        self.db.add(execution_event)
-
-        # Audit event
-        audit = AuditEvent(
+        create_audit_event(
+            db=self.db,
             agent_id=agent.id,
-
             run_id=run_id,
-
             finding_id=finding.id,
-
             event_type="GOVERNANCE_BLOCK",
-
             actor="governance",
-
             details={
                 "tool": tool_name,
                 "reason": decision.reason,
                 "severity": decision.severity,
             },
         )
-
-        self.db.add(audit)
 
         # Update run
         run = (
@@ -253,14 +266,15 @@ class AgentService:
             run.completed_at = datetime.now(timezone.utc)
 
         agent.status = "blocked"
-        self.db.add(AuditEvent(
+        create_audit_event(
+            db=self.db,
             agent_id=agent.id,
             run_id=run_id,
             finding_id=finding.id,
             event_type="AGENT_BLOCKED",
             actor="governance",
             details={"reason": decision.reason},
-        ))
+        )
 
         self.db.commit()
 
@@ -286,6 +300,102 @@ class AgentService:
         }
 
     # -----------------------------------------
+    # Authorized but high-risk: pause for approval
+    # -----------------------------------------
+
+    def request_approval(
+        self,
+        agent,
+        run_id,
+        tool_request,
+        decision,
+    ):
+        """The tool is authorized, but a human must approve it before it runs."""
+
+        tool_name = tool_request.tool_name
+
+        finding = create_finding(
+            db=self.db,
+            agent_id=agent.id,
+            run_id=run_id,
+            tool_name=tool_name,
+            severity=decision.severity,
+            reason=decision.reason,
+            finding_type="HIGH_RISK_ACTION",
+            expected="High-risk actions require human approval",
+        )
+
+        create_response_action(
+            db=self.db,
+            finding_id=finding.id,
+            action_type="REQUIRE_APPROVAL",
+            status="PENDING",
+            reason=decision.reason,
+        )
+
+        approval = create_approval(
+            db=self.db,
+            finding_id=finding.id,
+            requested_by="agent",
+        )
+
+        create_execution_event(
+            db=self.db,
+            run_id=run_id,
+            agent_id=agent.id,
+            event_type="TOOL_PENDING_APPROVAL",
+            tool_name=tool_name,
+            status="PENDING_APPROVAL",
+            details={
+                "reason": decision.reason,
+                "arguments": tool_request.arguments,
+            },
+        )
+
+        create_audit_event(
+            db=self.db,
+            agent_id=agent.id,
+            run_id=run_id,
+            finding_id=finding.id,
+            event_type="FINDING_CREATED",
+            actor="governance",
+            details={"finding_type": finding.finding_type, "severity": finding.severity},
+        )
+
+        create_audit_event(
+            db=self.db,
+            agent_id=agent.id,
+            run_id=run_id,
+            finding_id=finding.id,
+            event_type="APPROVAL_REQUESTED",
+            actor="governance",
+            details={
+                "approval_id": str(approval.id),
+                "tool": tool_name,
+                "severity": decision.severity,
+            },
+        )
+
+        run = self.db.get(AgentRun, run_id)
+
+        if run:
+            run.status = "pending_approval"
+
+        self.db.commit()
+
+        return {
+            "status": "pending_approval",
+            "message": "High-risk action is waiting for human approval.",
+            "tool": tool_name,
+            "arguments": tool_request.arguments,
+            "governance": "REQUIRE_APPROVAL",
+            "reason": decision.reason,
+            "severity": decision.severity,
+            "finding_id": str(finding.id),
+            "approval_id": str(approval.id),
+        }
+
+    # -----------------------------------------
     # Execute allowed tool
     # -----------------------------------------
 
@@ -295,57 +405,35 @@ class AgentService:
         run_id,
         tool_name,
         message,
+        arguments=None,
     ):
 
-        result = self._invoke_tool(tool_name, message)
+        result = self._invoke_tool(tool_name, message, arguments)
 
-        # -------------------------------------
-        # Execution event
-        # -------------------------------------
-
-        execution_event = ExecutionEvent(
+        create_execution_event(
+            db=self.db,
             run_id=run_id,
-
             agent_id=agent.id,
-
             event_type="TOOL_EXECUTED",
-
             tool_name=tool_name,
-
             status="SUCCESS",
-
             details={
                 "message": message,
                 "result": result,
             },
         )
 
-        self.db.add(
-            execution_event
-        )
-
-        # -------------------------------------
-        # Audit event
-        # -------------------------------------
-
-        audit = AuditEvent(
+        create_audit_event(
+            db=self.db,
             agent_id=agent.id,
-
             run_id=run_id,
-
-            finding_id=None,
-
             event_type="TOOL_EXECUTION",
-
             actor="agent",
-
             details={
                 "tool": tool_name,
                 "status": "SUCCESS",
             },
         )
-
-        self.db.add(audit)
 
         # -------------------------------------
         # Complete run
@@ -363,14 +451,14 @@ class AgentService:
             run.status = "completed"
             run.completed_at = datetime.now(timezone.utc)
 
-        self.db.add(AuditEvent(
+        create_audit_event(
+            db=self.db,
             agent_id=agent.id,
             run_id=run_id,
-            finding_id=None,
             event_type="RUN_COMPLETED",
             actor="agent",
             details={"tool": tool_name},
-        ))
+        )
 
         self.db.commit()
 
@@ -395,6 +483,7 @@ class AgentService:
         tool_name: str,
         approved_by: str,
         approval_id,
+        finding_id=None,
     ):
         """Execute only the tool captured in an approved finding."""
         agent = self.db.get(Agent, agent_id)
@@ -402,37 +491,74 @@ class AgentService:
         if not agent or not run:
             raise ValueError("Agent run not found")
 
-        result = self._invoke_tool(tool_name, run.input_message)
-        self.db.add(ExecutionEvent(
+        arguments = self._requested_arguments(run.id, tool_name)
+        result = self._invoke_tool(tool_name, run.input_message, arguments)
+        create_execution_event(
+            db=self.db,
             run_id=run.id,
             agent_id=agent.id,
             event_type="APPROVED_TOOL_EXECUTED",
             tool_name=tool_name,
             status="SUCCESS",
-            details={"approval_id": str(approval_id), "result": result},
-        ))
-        self.db.add(AuditEvent(
+            details={
+                "approval_id": str(approval_id),
+                "arguments": arguments,
+                "result": result,
+            },
+        )
+        create_audit_event(
+            db=self.db,
             agent_id=agent.id,
             run_id=run.id,
-            finding_id=None,
             event_type="APPROVED_ACTION_EXECUTED",
             actor=approved_by,
             details={"approval_id": str(approval_id), "tool": tool_name},
-        ))
+        )
+        if finding_id:
+            for action in (
+                self.db.query(ResponseAction)
+                .filter(
+                    ResponseAction.finding_id == finding_id,
+                    ResponseAction.status == "PENDING",
+                )
+                .all()
+            ):
+                action.status = "EXECUTED"
+
         run.status = "completed"
         run.completed_at = datetime.now(timezone.utc)
         self.db.commit()
-        return {"status": "completed", "tool": tool_name, "result": result}
+        return {
+            "status": "completed",
+            "tool": tool_name,
+            "arguments": arguments,
+            "result": result,
+        }
+
+    def _requested_arguments(self, run_id, tool_name: str) -> dict | None:
+        """Recover the arguments the agent originally proposed for this run."""
+
+        event = (
+            self.db.query(ExecutionEvent)
+            .filter(
+                ExecutionEvent.run_id == run_id,
+                ExecutionEvent.event_type == TOOL_REQUEST_EVENT,
+                ExecutionEvent.tool_name == tool_name,
+            )
+            .order_by(ExecutionEvent.created_at.desc())
+            .first()
+        )
+
+        if not event:
+            return None
+
+        arguments = (event.details or {}).get("arguments")
+
+        return arguments if isinstance(arguments, dict) else None
 
     @staticmethod
-    def _invoke_tool(tool_name: str, message: str):
-        tool = get_tool(tool_name)
-        if not tool:
-            raise ValueError(f"Tool '{tool_name}' does not exist")
-        if tool_name == "faq_search":
-            return tool.function(query=message)
-        if tool_name == "send_email":
-            return tool.function(recipient="demo@example.com", message=message)
-        if tool_name == "customer_database":
-            return tool.function(customer_id="CUST-001")
-        raise ValueError(f"Unsupported tool: {tool_name}")
+    def _invoke_tool(tool_name: str, message: str, arguments: dict | None = None):
+        return execute_tool(
+            tool_name=tool_name,
+            arguments=arguments if arguments else default_arguments(tool_name, message),
+        )
