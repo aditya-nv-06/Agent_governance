@@ -1,4 +1,18 @@
-const API_URL = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
+function getApiBaseUrl() {
+  const configured = import.meta.env.VITE_API_URL?.trim();
+  if (configured) {
+    return configured.replace(/\/$/, "");
+  }
+
+  const hostname = typeof window !== "undefined" ? window.location.hostname : "";
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    return "/api";
+  }
+
+  throw new Error("Missing VITE_API_URL. Set it to https://agent-governance-dgg5.onrender.com and redeploy the frontend.");
+}
+
+const API_URL = getApiBaseUrl();
 const ACTIVE_SESSION_KEY = "agent-governance-active-admin";
 // Base key for storing sessions. Per-admin sessions are stored as "agent-governance-admin:<id>".
 const SESSION_KEY_PREFIX = "agent-governance-admin";
@@ -50,28 +64,33 @@ async function request(
   endpoint,
   options = {}
 ) {
+  try {
+    const response = await fetch(
+      `${API_URL}${endpoint}`,
+      {
+        ...options,
+        headers: {
+          "Content-Type": "application/json",
+          ...(getSession()?.access_token ? { Authorization: `Bearer ${getSession().access_token}` } : {}),
+          ...options.headers,
+        },
+      }
+    );
 
-  const response = await fetch(
-    `${API_URL}${endpoint}`,
-    {
-      ...options,
-      headers: {
-        "Content-Type": "application/json",
-        ...(getSession()?.access_token ? { Authorization: `Bearer ${getSession().access_token}` } : {}),
-        ...options.headers,
-      },
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      const error = payload?.detail || "Request failed. Please try again.";
+      throw new Error(error);
     }
-  );
 
-
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null);
-    const error = payload?.detail || "Request failed. Please try again.";
-    throw new Error(error);
+    if (response.status === 204) return null;
+    return response.json();
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw new Error("Unable to reach the backend. Check that the backend is running and VITE_API_URL is configured correctly.");
+    }
+    throw error;
   }
-
-  if (response.status === 204) return null;
-  return response.json();
 }
 
 export function registerAdmin(payload) {
