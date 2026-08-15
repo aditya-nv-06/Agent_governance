@@ -18,6 +18,9 @@ export default function Agents({
   const [warningThreshold, setWarningThreshold] = useState("80");
   const [criticalThreshold, setCriticalThreshold] = useState("90");
   const [error, setError] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
+  const [deleteError, setDeleteError] = useState("");
   const [showProfileForm, setShowProfileForm] = useState({});
   const [profileForm, setProfileForm] = useState({});
 
@@ -91,6 +94,8 @@ export default function Agents({
 
       <div className="space-y-3">
 
+        {deleteError && <p className="text-xs text-rose-200">{deleteError}</p>}
+
         {agents.map((agent) => {
           const profile = profiles.find((item) => item.agent_id === agent.id);
 
@@ -134,14 +139,14 @@ export default function Agents({
                 {!showProfileForm[agent.id] ? (
                   <div className="flex gap-2">
                     <button type="button" className="border border-white px-3 py-1 text-xs" onClick={() => setShowProfileForm((s) => ({ ...s, [agent.id]: true }))}>Add profile</button>
-                    <button type="button" className="border border-rose-300 px-3 py-1 text-xs" onClick={async () => {
-                      if (!confirm("Delete this agent? This cannot be undone.")) return;
-                      try {
-                        await onDeleteAgent(agent.id);
-                      } catch (err) {
-                        alert(err?.message || "Failed to delete agent");
-                      }
-                    }}>Delete agent</button>
+                    <button
+                      type="button"
+                      className="border border-rose-300 px-3 py-1 text-xs text-rose-200 hover:bg-rose-700/10"
+                      onClick={() => setConfirmDelete(agent)}
+                      disabled={deletingId === agent.id}
+                    >
+                      {deletingId === agent.id ? "Deleting…" : "Delete agent"}
+                    </button>
                   </div>
                 ) : (
                   <form className="mt-3 grid gap-2 sm:grid-cols-2" onSubmit={async (e) => {
@@ -181,14 +186,14 @@ export default function Agents({
             )}
             <div className="mt-3">
               {profile && (
-                  <button type="button" className="border border-rose-300 px-3 py-1 text-xs" onClick={async () => {
-                    if (!confirm("Delete this agent? This cannot be undone.")) return;
-                    try {
-                      await onDeleteAgent(agent.id);
-                    } catch (err) {
-                      alert(err?.message || "Failed to delete agent");
-                    }
-                  }}>Delete agent</button>
+                  <button
+                    type="button"
+                    className="border border-rose-300 px-3 py-1 text-xs text-rose-200 hover:bg-rose-700/10"
+                    onClick={() => setConfirmDelete(agent)}
+                    disabled={deletingId === agent.id}
+                  >
+                    {deletingId === agent.id ? "Deleting…" : "Delete agent"}
+                  </button>
               )}
             </div>
 
@@ -198,6 +203,43 @@ export default function Agents({
         })}
 
       </div>
+
+      {confirmDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="w-full max-w-lg rounded border border-white/20 bg-white/5 p-6">
+            <h3 className="text-lg font-medium">Delete agent</h3>
+            <p className="mt-3 text-sm text-white/60">Are you sure you want to permanently delete <strong className="text-white">{confirmDelete.name}</strong>? This cannot be undone.</p>
+            <div className="mt-5 flex items-center gap-3">
+              <button
+                className="bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-500 disabled:opacity-60"
+                onClick={async () => {
+                  setDeleteError("");
+                  setDeletingId(confirmDelete.id);
+                  try {
+                    await onDeleteAgent(confirmDelete.id);
+                    setConfirmDelete(null);
+                  } catch (err) {
+                    setDeleteError(err?.message || "Failed to delete agent");
+                  } finally {
+                    setDeletingId(null);
+                  }
+                }}
+                disabled={deletingId === confirmDelete.id}
+              >
+                {deletingId === confirmDelete.id ? "Deleting…" : "Yes, delete"}
+              </button>
+
+              <button
+                className="border px-4 py-2 text-sm"
+                onClick={() => setConfirmDelete(null)}
+                disabled={deletingId === confirmDelete.id}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </section>
   );
