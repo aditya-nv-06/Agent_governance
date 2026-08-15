@@ -1,9 +1,8 @@
+from dataclasses import dataclass
 from typing import Callable
 
 
-def faq_search(
-    query: str,
-):
+def faq_search(query: str):
 
     return {
         "tool": "faq_search",
@@ -29,9 +28,7 @@ def send_email(
     }
 
 
-def customer_database(
-    customer_id: str,
-):
+def customer_database(customer_id: str):
 
     return {
         "tool": "customer_database",
@@ -41,30 +38,50 @@ def customer_database(
     }
 
 
-TOOLS: dict[str, Callable] = {
+@dataclass(frozen=True)
+class Tool:
+    """Registry metadata the governance evaluator enforces against a profile."""
 
-    "faq_search":
-        faq_search,
+    name: str
+    function: Callable
+    data_source: str
+    action: str
+    arguments: tuple[str, ...]
 
-    "send_email":
-        send_email,
 
-    "customer_database":
-        customer_database,
+TOOLS: dict[str, Tool] = {
+
+    "faq_search": Tool(
+        name="faq_search",
+        function=faq_search,
+        data_source="faq_database",
+        action="search",
+        arguments=("query",),
+    ),
+
+    "send_email": Tool(
+        name="send_email",
+        function=send_email,
+        data_source="email_service",
+        action="send_email",
+        arguments=("recipient", "message"),
+    ),
+
+    "customer_database": Tool(
+        name="customer_database",
+        function=customer_database,
+        data_source="customer_database",
+        action="read",
+        arguments=("customer_id",),
+    ),
 }
 
 
-def get_tool(
-    tool_name: str,
-):
+def get_tool(tool_name: str) -> Tool | None:
 
-    return TOOLS.get(
-        tool_name
-    )
+    return TOOLS.get(tool_name)
 
 
-def list_tools():
+def list_tools() -> list[str]:
 
-    return list(
-        TOOLS.keys()
-    )
+    return list(TOOLS.keys())

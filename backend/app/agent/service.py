@@ -12,9 +12,12 @@ from ..models import (
 )
 
 from ..governance.gateway import GovernanceGateway
+from ..governance.evaluator import PolicyDecision
 
-from .decision import decide_tool_request
-from .tools import get_tool
+from .decision import default_arguments
+from .executor import execute_tool
+from .runtime import propose_tool_request
+from .tools import get_tool, list_tools
 
 
 class AgentService:
@@ -28,7 +31,7 @@ class AgentService:
     # -----------------------------------------
 
     def choose_tool(self, message: str) -> str:
-        return decide_tool_request(message).tool_name
+        return propose_tool_request(message).tool_request.tool_name
 
     # -----------------------------------------
     # Execute agent run
@@ -54,24 +57,10 @@ class AgentService:
                 "Agent not found"
             )
 
-        tool_request = decide_tool_request(message)
+        proposal = propose_tool_request(message)
+        tool_request = proposal.tool_request
         tool_name = tool_request.tool_name
         tool = get_tool(tool_name)
-        if not tool:
-            raise ValueError(f"Tool '{tool_name}' does not exist")
-
-        # -------------------------------------
-        # Governance check
-        # -------------------------------------
-
-        decision = (
-            self.gateway.authorize_tool(
-                agent_id=agent_id,
-                tool_name=tool_name,
-                data_source=tool.data_source,
-                action=tool.action,
-            )
-        )
 
         self.db.add(AuditEvent(
             agent_id=agent.id,
@@ -81,10 +70,38 @@ class AgentService:
             actor="agent",
             details={
                 "tool": tool_name,
-                "data_source": tool.data_source,
-                "action": tool.action,
+                "arguments": tool_request.arguments,
+                "data_source": tool.data_source if tool else None,
+                "action": tool.action if tool else None,
+                "decided_by": proposal.source,
+                "model": proposal.model,
             },
         ))
+
+        # -------------------------------------
+        # Governance check
+        # -------------------------------------
+
+        if not tool:
+
+            # An unregistered proposal never reaches the executor.
+            decision = PolicyDecision(
+                allowed=False,
+                reason=f"Tool '{tool_name}' is not registered",
+                severity="HIGH",
+                expected_tools=list_tools(),
+            )
+
+        else:
+
+            decision = (
+                self.gateway.authorize_tool(
+                    agent_id=agent_id,
+                    tool_name=tool_name,
+                    data_source=tool.data_source,
+                    action=tool.action,
+                )
+            )
 
         if decision.warning:
             self.db.add(AuditEvent(
@@ -127,6 +144,7 @@ class AgentService:
             run_id=run_id,
             tool_name=tool_name,
             message=message,
+            arguments=tool_request.arguments,
         )
 
     # -----------------------------------------
@@ -295,9 +313,10 @@ class AgentService:
         run_id,
         tool_name,
         message,
+        arguments=None,
     ):
 
-        result = self._invoke_tool(tool_name, message)
+        result = self._invoke_tool(tool_name, message, arguments)
 
         # -------------------------------------
         # Execution event
@@ -425,14 +444,8 @@ class AgentService:
         return {"status": "completed", "tool": tool_name, "result": result}
 
     @staticmethod
-    def _invoke_tool(tool_name: str, message: str):
-        tool = get_tool(tool_name)
-        if not tool:
-            raise ValueError(f"Tool '{tool_name}' does not exist")
-        if tool_name == "faq_search":
-            return tool.function(query=message)
-        if tool_name == "send_email":
-            return tool.function(recipient="demo@example.com", message=message)
-        if tool_name == "customer_database":
-            return tool.function(customer_id="CUST-001")
-        raise ValueError(f"Unsupported tool: {tool_name}")
+    def _invoke_tool(tool_name: str, message: str, arguments: dict | None = None):
+        return execute_tool(
+            tool_name=tool_name,
+            arguments=arguments if arguments else default_arguments(tool_name, message),
+        )

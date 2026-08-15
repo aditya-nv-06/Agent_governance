@@ -138,3 +138,4 @@ class AgentDecisionRequest(BaseModel):
 class AgentDecisionResponse(BaseModel):
     tool_name: str
     arguments: dict
+    source: str

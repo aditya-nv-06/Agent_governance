@@ -15,7 +15,7 @@ React dashboard ── /api proxy ──> FastAPI
 ## Governance flow
 
 ```text
-User request → decision layer creates ToolRequest → governance evaluation
+User request → LLM proposes ToolRequest → governance evaluation
                                                    ├─ allowed → execute → run completed → audit
                                                    └─ denied  → finding → agent blocked → approval → audit
                                                                                        ├─ approve → resume → execute original tool
@@ -24,7 +24,7 @@ User request → decision layer creates ToolRequest → governance evaluation
 
 ## Run locally
 
-1. Configure `backend/.env` with `DATABASE_URL=postgresql+psycopg://USER:PASSWORD@localhost:5432/agent_governance`.
+1. Copy `backend/.env.example` to `backend/.env` and set `DATABASE_URL`. Set `OPENAI_API_KEY` (and optionally `OPENAI_MODEL`) to enable the LLM decision layer; without a key the deterministic rule-based agent is used.
 2. Start the API: `cd backend && ./.venv/bin/uvicorn app.main:app --reload`
 3. Start the dashboard: `cd frontend && npm install && npm run dev`
 4. Seed a demo agent and its profile once: `cd backend && ./.venv/bin/python seed.py`
@@ -44,12 +44,14 @@ The seeded Customer Support Agent is permitted to use `faq_search` and `send_ema
 
 - `GET /agents`, `POST /agents`, `GET /profiles`, `POST /profiles`, `PUT /profiles/{id}`
 - `POST /runs`, `GET /runs`
+- `POST /agent/decide`, `GET /agent/tools`
 - `GET /findings`, `GET /approvals`, `POST /approvals/{id}/decision`, `POST /approvals/{id}/execute`, `GET /audit`
 
 Interactive API documentation is available at `http://localhost:8000/docs`.
 
 ## Design notes and limitations
 
-- The agent is deliberately small and deterministic; the important v1 behavior is the governance boundary, not an LLM implementation.
+- The LLM only proposes a tool request; it never executes a tool. Every proposal — including one naming an unregistered tool — is evaluated by the governance layer before `app/agent/executor.py` may run anything. `POST /agent/decide` returns the raw proposal without executing it.
+- If the LLM is not configured or its call fails, the run falls back to the deterministic rule-based agent, and the `TOOL_REQUESTED` audit event records which decision source (`llm`, `rules`, `rules_fallback`) and model produced the request.
 - Tool selection is monitored at the runtime gateway. Tool, data source, and action are enforced using tool metadata. A daily run count acts as the v1 LLM-call usage metric and writes a warning audit event at configured warning/critical thresholds; usage over the configured maximum is blocked.
 - The startup migration is additive for the initial local PostgreSQL schema. A production version should replace it with Alembic migrations and authentication/role checks around profile and approval changes.
