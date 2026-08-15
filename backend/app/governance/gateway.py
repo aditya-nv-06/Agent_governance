@@ -26,11 +26,12 @@ class GovernanceGateway:
                 reason=f"Tool '{tool_request.tool_name}' is not registered",
                 severity="HIGH",
                 expected_tools=list_tools(),
+                status="BLOCK",
             )
 
         return self.authorize_tool(
             agent_id=agent_id,
-            tool_name=tool.name,
+            tool_name=tool_request.tool_name,
             data_source=tool.data_source,
             action=tool.action,
             requires_approval=tool.requires_approval,

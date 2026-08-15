@@ -211,9 +211,8 @@ class AgentService:
             db=self.db,
             agent_id=agent.id,
             run_id=run_id,
-
+            tool_name=tool_name,
             finding_type=decision.finding_type,
-
             severity=decision.severity,
             reason=decision.reason,
             expected=", ".join(decision.expected_tools),

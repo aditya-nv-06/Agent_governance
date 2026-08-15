@@ -109,6 +109,12 @@ class GovernanceTests(unittest.TestCase):
         limited = PolicyEvaluator(self.db).check_tool(self.agent.id, "faq_search")
         self.assertFalse(limited.allowed)
 
+    def test_requires_approval_decision_has_status_metadata(self):
+        decision = PolicyEvaluator(self.db).check_tool(self.agent.id, "send_email", requires_approval=True)
+        self.assertTrue(decision.allowed)
+        self.assertTrue(decision.requires_approval)
+        self.assertEqual(decision.status, "REQUIRE_APPROVAL")
+
 
 if __name__ == "__main__":
     unittest.main()

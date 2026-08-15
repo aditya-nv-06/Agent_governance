@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from dataclasses import dataclass
 from typing import Callable
 
 
@@ -10,6 +9,7 @@ class ToolDefinition:
     function: Callable
     data_source: str
     action: str
+    requires_approval: bool = False
 
 
 def faq_search(
@@ -60,6 +60,7 @@ TOOLS: dict[str, ToolDefinition] = {
         function=send_email,
         data_source="email_service",
         action="send_email",
+        requires_approval=True,
     ),
     "customer_database": ToolDefinition(
         function=customer_database,

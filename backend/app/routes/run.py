@@ -85,8 +85,8 @@ def create_run(
 
         raise HTTPException(
             status_code=500,
-            detail="Agent run failed unexpectedly",
-        )
+            detail=str(error),
+        ) from error
 
 
 @router.get("")

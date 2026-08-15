@@ -28,6 +28,14 @@ class PolicyDecision:
     warning: str | None = None
 
     finding_type: str = "UNAUTHORIZED_TOOL"
+    requires_approval: bool = False
+    status: str = "ALLOW"
+
+    def __post_init__(self):
+        if self.status == "ALLOW" and not self.allowed:
+            self.status = BLOCK
+        elif self.status == "ALLOW" and self.requires_approval:
+            self.status = REQUIRE_APPROVAL
 
 
 class PolicyEvaluator:
@@ -78,6 +86,7 @@ class PolicyEvaluator:
                 allowed=False,
                 reason="Agent does not exist",
                 severity="CRITICAL",
+                status=BLOCK,
             )
 
 
@@ -94,6 +103,7 @@ class PolicyEvaluator:
                     f"'{agent.status}'"
                 ),
                 severity="CRITICAL",
+                status=BLOCK,
             )
 
 
@@ -118,6 +128,7 @@ class PolicyEvaluator:
                     "behavior profile"
                 ),
                 severity="CRITICAL",
+                status=BLOCK,
             )
 
 
@@ -148,6 +159,7 @@ class PolicyEvaluator:
                 severity="HIGH",
 
                 expected_tools=allowed_tools,
+                status=BLOCK,
             )
 
         if data_source and data_source not in (profile.allowed_data_sources or []):
@@ -156,6 +168,7 @@ class PolicyEvaluator:
                 reason=f"Data source '{data_source}' is not authorized for this agent",
                 severity="HIGH",
                 expected_tools=profile.allowed_data_sources or [],
+                status=BLOCK,
             )
 
         if action and action not in (profile.allowed_actions or []):
@@ -164,6 +177,7 @@ class PolicyEvaluator:
                 reason=f"Action '{action}' is not authorized for this agent",
                 severity="HIGH",
                 expected_tools=profile.allowed_actions or [],
+                status=BLOCK,
             )
 
         today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -177,6 +191,7 @@ class PolicyEvaluator:
                 allowed=False,
                 reason=f"Daily LLM-call limit reached ({usage}/{profile.max_llm_calls})",
                 severity="CRITICAL",
+                status=BLOCK,
             )
 
         usage_percent = (usage / profile.max_llm_calls) * 100
@@ -205,4 +220,5 @@ class PolicyEvaluator:
             expected_tools=allowed_tools,
             warning=warning,
             requires_approval=requires_approval,
+            status=REQUIRE_APPROVAL if requires_approval else ALLOW,
         )
