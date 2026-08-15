@@ -1,9 +1,10 @@
 const API_URL = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
 const ACTIVE_SESSION_KEY = "agent-governance-active-admin";
-const SESSION_KEY_PREFIX = "agent-governance-admin:";
+// Base key for storing sessions. Per-admin sessions are stored as "agent-governance-admin:<id>".
+const SESSION_KEY_PREFIX = "agent-governance-admin";
 
 function getSessionKey(adminId) {
-  return adminId ? `${SESSION_KEY_PREFIX}${adminId}` : SESSION_KEY_PREFIX;
+  return adminId ? `${SESSION_KEY_PREFIX}:${adminId}` : SESSION_KEY_PREFIX;
 }
 
 export function getSession() {
@@ -38,7 +39,8 @@ export function saveSession(session) {
 }
 
 export function clearSession() {
-  const keys = Object.keys(localStorage).filter((key) => key.startsWith(SESSION_KEY_PREFIX) || key === "agent-governance-admin");
+  const perAdminPrefix = `${SESSION_KEY_PREFIX}:`;
+  const keys = Object.keys(localStorage).filter((key) => key.startsWith(perAdminPrefix) || key === SESSION_KEY_PREFIX);
   keys.forEach((key) => localStorage.removeItem(key));
   localStorage.removeItem(ACTIVE_SESSION_KEY);
 }
