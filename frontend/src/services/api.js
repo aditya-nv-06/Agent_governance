@@ -182,3 +182,12 @@ export function runAgent(
     }
   );
 }
+
+// Simulation and analytics
+export function simulateAgent(agentId, count = 5) {
+  return request(`/simulate/${agentId}?count=${count}`, { method: "POST" });
+}
+
+export function getAgentsAnalytics() {
+  return request(`/simulate/analytics/agents`);
+}

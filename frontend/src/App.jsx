@@ -3,6 +3,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import AgentRunner from "./components/AgentRunner";
 import AuthPage from "./components/AuthPage";
 import Agents from "./components/Agents";
+import Simulate from "./components/Simulate";
+import Analytics from "./components/Analytics";
 import Approvals from "./components/Approvals";
 import AuditEvents from "./components/AuditEvents";
 import Findings from "./components/Findings";
@@ -147,8 +149,10 @@ function App() {
         <Stats {...stats} />
 
         <div className="mt-10 space-y-10">
-          <Agents agents={dashboard.agents} profiles={dashboard.profiles} onCreateAgent={handleCreateAgent} onDeleteAgent={handleDeleteAgent} onCreateProfile={handleCreateProfile} />
+          <Agents agents={dashboard.agents} profiles={dashboard.profiles} onCreateAgent={handleCreateAgent} onDeleteAgent={handleDeleteAgent} onCreateProfile={handleCreateProfile} onSimulate={loadDashboard} />
           {dashboard.agents[0] && <AgentRunner agentId={dashboard.agents[0].id} onComplete={loadDashboard} />}
+          <Simulate agents={dashboard.agents} onComplete={loadDashboard} />
+          <Analytics analytics={dashboard.analytics || []} />
           <Runs
             runs={dashboard.runs}
             agents={dashboard.agents}

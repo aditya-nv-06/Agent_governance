@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { simulateAgent } from "../services/api";
 
 export default function Agents({
   agents,
@@ -6,6 +7,7 @@ export default function Agents({
   onCreateAgent,
   onDeleteAgent,
   onCreateProfile,
+  onSimulate,
 }) {
   const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState("");
@@ -21,6 +23,8 @@ export default function Agents({
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [deleteError, setDeleteError] = useState("");
+  const [simLoadingId, setSimLoadingId] = useState(null);
+  const [simResult, setSimResult] = useState(null);
   const [showProfileForm, setShowProfileForm] = useState({});
   const [profileForm, setProfileForm] = useState({});
 
@@ -195,6 +199,29 @@ export default function Agents({
                     {deletingId === agent.id ? "Deleting…" : "Delete agent"}
                   </button>
               )}
+              <button
+                type="button"
+                className="ml-2 border px-3 py-1 text-xs"
+                onClick={async () => {
+                  setSimLoadingId(agent.id);
+                  setSimResult(null);
+                  try {
+                    await simulateAgent(agent.id, 5);
+                    setSimResult({ message: "Simulation created" });
+                    await onSimulate?.();
+                  } catch (err) {
+                    setSimResult({ error: err?.message || "Simulation failed" });
+                  } finally {
+                    setSimLoadingId(null);
+                    setTimeout(() => setSimResult(null), 3000);
+                  }
+                }}
+                disabled={simLoadingId === agent.id}
+              >
+                {simLoadingId === agent.id ? "Simulating…" : "Simulate"}
+              </button>
+              {simResult && simResult.error && <div className="mt-2 text-xs text-rose-200">{simResult.error}</div>}
+              {simResult && simResult.message && <div className="mt-2 text-xs text-white/60">{simResult.message}</div>}
             </div>
 
           </article>
