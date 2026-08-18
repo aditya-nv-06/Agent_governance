@@ -202,7 +202,11 @@ def execute_approved_action(
     if not approval:
         raise HTTPException(status_code=404, detail="Approval not found")
     if approval.status == "EXECUTED":
-        return {"status": "executed", "approval_id": str(approval_id), "message": "Approved action already executed"}
+        raise HTTPException(status_code=409, detail="Approved action already executed")
+
+    # Only allow execution for approvals that have been explicitly APPROVED
+    if approval.status != "APPROVED":
+        raise HTTPException(status_code=403, detail="Approval not permitted to execute")
 
     finding = db.get(Finding, approval.finding_id) if approval.finding_id else None
     
@@ -217,7 +221,7 @@ def execute_approved_action(
                 finding_id=finding.id,
             )
         else:
-            result = {"status": "executed", "approval_id": str(approval.id)}
+            result = {"status": "completed", "approval_id": str(approval.id)}
     except Exception:
         result = {"status": "executed", "approval_id": str(approval.id), "tool": finding.actual if finding else "action"}
 
