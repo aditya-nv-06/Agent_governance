@@ -47,6 +47,27 @@ async def get_connection_info() -> ConnectResponse:
     )
 
 
+
+@router.post("/disconnect")
+async def disconnect(request: Optional[ConnectRequest] = None) -> ConnectResponse:
+    """
+    Disconnect from the customer service agent.
+    Returns a status indicating the service is disconnected.
+    """
+    now = datetime.utcnow().isoformat()
+    default_service = getattr(settings, "service_url", f"http://localhost:{settings.port}")
+    service_url = request.url if request and request.url else default_service
+    service_name = request.service_name if request and request.service_name else "Customer Service Agent"
+
+    return ConnectResponse(
+        status="disconnected",
+        url=service_url,
+        service_name=service_name,
+        timestamp=now,
+        message=f"Disconnected from {service_name} at {service_url}",
+    )
+
+
 @router.get("/health")
 async def health():
     """Health check endpoint"""
