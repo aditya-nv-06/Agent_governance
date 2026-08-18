@@ -94,35 +94,39 @@ def get_runs(
     db: Session = Depends(get_db),
     admin: AdminUser = Depends(require_admin),
 ):
-
     runs = (
         db.query(AgentRun)
-        .join(Agent, AgentRun.agent_id == Agent.id)
-        .filter(Agent.owner_id == admin.id)
         .order_by(
             AgentRun.created_at.desc()
         )
+        .limit(250)
         .all()
     )
+    if not runs:
+        return []
+
+    run_ids = [r.id for r in runs]
+    events = (
+        db.query(ExecutionEvent)
+        .filter(
+            ExecutionEvent.run_id.in_(run_ids),
+            ExecutionEvent.event_type == "LLM_TOOL_REQUEST",
+        )
+        .all()
+    )
+    event_by_run = {e.run_id: e for e in events}
 
     response = []
     for run in runs:
-        request_event = (
-            db.query(ExecutionEvent)
-            .filter(
-                ExecutionEvent.run_id == run.id,
-                ExecutionEvent.event_type == "LLM_TOOL_REQUEST",
-            )
-            .first()
-        )
+        request_event = event_by_run.get(run.id)
         tool = get_tool(request_event.tool_name) if request_event and request_event.tool_name else None
         response.append({
             "id": str(run.id),
             "agent_id": str(run.agent_id),
             "status": run.status,
             "input_message": run.input_message,
-            "created_at": run.created_at,
-            "completed_at": run.completed_at,
+            "created_at": run.created_at.isoformat() if run.created_at else None,
+            "completed_at": run.completed_at.isoformat() if run.completed_at else None,
             "tool_name": request_event.tool_name if request_event else None,
             "data_source": tool.data_source if tool else None,
             "action": tool.action if tool else None,

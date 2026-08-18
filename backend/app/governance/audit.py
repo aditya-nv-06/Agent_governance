@@ -12,18 +12,21 @@ class AuditService:
 
     def record(
         self,
-        agent_id: uuid.UUID,
+        agent_id: uuid.UUID | str,
         event_type: str,
         actor: str,
-        run_id: uuid.UUID | None = None,
-        finding_id: uuid.UUID | None = None,
+        run_id: uuid.UUID | str | None = None,
+        finding_id: uuid.UUID | str | None = None,
         details: dict | None = None
     ):
+        aid = uuid.UUID(str(agent_id)) if agent_id and not isinstance(agent_id, uuid.UUID) else agent_id
+        rid = uuid.UUID(str(run_id)) if run_id and not isinstance(run_id, uuid.UUID) else run_id
+        fid = uuid.UUID(str(finding_id)) if finding_id and not isinstance(finding_id, uuid.UUID) else finding_id
 
         event = AuditEvent(
-            agent_id=agent_id,
-            run_id=run_id,
-            finding_id=finding_id,
+            agent_id=aid,
+            run_id=rid,
+            finding_id=fid,
             event_type=event_type,
             actor=actor,
             details=details or {}

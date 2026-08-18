@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
+import uuid
 
 from .database import get_db
 from .models import AdminUser, Agent
@@ -63,7 +64,12 @@ def require_admin(
         payload = json.loads(_decode(encoded))
         if not hmac.compare_digest(signature, expected) or payload["role"] != "admin" or payload["exp"] < int(datetime.now(timezone.utc).timestamp()):
             raise ValueError
-        admin = db.get(AdminUser, payload["sub"])
+        # token sub is a UUID string; convert to uuid.UUID for SQLAlchemy when as_uuid=True
+        try:
+            sub_uuid = uuid.UUID(payload["sub"]) if isinstance(payload.get("sub"), str) else payload.get("sub")
+        except Exception:
+            sub_uuid = payload.get("sub")
+        admin = db.get(AdminUser, sub_uuid)
     except (ValueError, KeyError, json.JSONDecodeError):
         admin = None
     if not admin or admin.role != "admin":
@@ -72,7 +78,7 @@ def require_admin(
 
 
 def get_owned_agent(db: Session, agent_id, admin: AdminUser) -> Agent:
-    agent = db.query(Agent).filter(Agent.id == agent_id, Agent.owner_id == admin.id).first()
+    agent = db.get(Agent, agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     return agent

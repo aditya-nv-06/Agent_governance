@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { simulateAgent } from "../services/api";
+import { useState, useEffect } from "react";
+import { registerEnvAgent, getEnvAgents, triggerEnvAgent, getEnvLogs } from "../services/api";
 
 export default function Agents({
   agents,
@@ -9,7 +9,6 @@ export default function Agents({
   onCreateProfile,
   onSimulate,
 }) {
-  const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [profileName, setProfileName] = useState("");
@@ -27,44 +26,85 @@ export default function Agents({
   const [simResult, setSimResult] = useState(null);
   const [showProfileForm, setShowProfileForm] = useState({});
   const [profileForm, setProfileForm] = useState({});
+  const [envName, setEnvName] = useState("");
+  const [envUrl, setEnvUrl] = useState("");
+  const [envPurpose, setEnvPurpose] = useState("");
+  const [envAllowed, setEnvAllowed] = useState("");
+  const [envAgents, setEnvAgents] = useState([]);
+  const [envLogs, setEnvLogs] = useState([]);
+  const [envLoading, setEnvLoading] = useState(false);
+  const [showLogsFor, setShowLogsFor] = useState(null);
 
   function parseList(value) {
     return (value || "").split(",").map((item) => item.trim()).filter(Boolean);
   }
 
-  async function createAgent(event) {
-    event.preventDefault();
-    if (!name.trim()) return;
+  // Internal agent creation removed — external environment agents only
 
-    const nextProfile = {
-      name: profileName.trim() || `${name.trim()} profile`,
-      allowed_tools: parseList(allowedTools),
-      allowed_data_sources: parseList(allowedData),
-      allowed_actions: parseList(allowedActions),
-      max_llm_calls: Number(maxLlmCalls || 1000),
-      warning_threshold: Number(warningThreshold || 80),
-      critical_threshold: Number(criticalThreshold || 90),
-    };
-
+  async function loadEnvAgents() {
     try {
-      setError("");
-      await onCreateAgent({
-        name: name.trim(),
-        description: description.trim() || null,
-        profile: nextProfile,
-      });
-      setName("");
-      setDescription("");
-      setProfileName("");
-      setAllowedTools("");
-      setAllowedData("");
-      setAllowedActions("");
-      setMaxLlmCalls("1000");
-      setWarningThreshold("80");
-      setCriticalThreshold("90");
-      setShowCreate(false);
+      const list = await getEnvAgents();
+      setEnvAgents(list || []);
     } catch {
-      setError("Agent creation requires a valid behavior profile. Please add a profile before saving the agent.");
+      setEnvAgents([]);
+      setError("Failed to load environment agents. You may need to login or start the backend (check VITE_API_URL).");
+    }
+  }
+
+  useEffect(() => {
+    loadEnvAgents();
+  }, []);
+
+  // Auto-refresh logs when a specific agent's logs are shown
+  useEffect(() => {
+    if (!showLogsFor) return;
+    const id = showLogsFor;
+    loadLogs(id);
+    const t = setInterval(() => loadLogs(id), 3000);
+    return () => clearInterval(t);
+  }, [showLogsFor]);
+
+  async function createEnvAgent(e) {
+    e.preventDefault();
+    if (!envName || !envUrl) return;
+    setEnvLoading(true);
+    setError("");
+    try {
+      const allowedList = (envAllowed || "").split(",").map((s) => s.trim()).filter(Boolean);
+      await registerEnvAgent({ name: envName, url: envUrl, purpose: envPurpose, allowed_instructions: allowedList });
+      setEnvName("");
+      setEnvUrl("");
+      setEnvPurpose("");
+      setEnvAllowed("");
+      await loadEnvAgents();
+      await onSimulate?.();
+    } catch (err) {
+      setError(err?.message || "Failed to register environment agent");
+    } finally {
+      setEnvLoading(false);
+    }
+  }
+
+  async function triggerEnv(agentId) {
+    setEnvLoading(true);
+    try {
+      await triggerEnvAgent(agentId, { message: "Hello from UI" });
+      await loadLogs(agentId);
+      await onSimulate?.();
+    } catch (err) {
+      // ignore
+    } finally {
+      setEnvLoading(false);
+    }
+  }
+
+  async function loadLogs(agentId = null) {
+    try {
+      const logs = await getEnvLogs(agentId);
+      setEnvLogs(logs || []);
+      setShowLogsFor(agentId);
+    } catch {
+      setEnvLogs([]);
     }
   }
 
@@ -74,26 +114,81 @@ export default function Agents({
 
       <div className="mb-4 flex items-center justify-between gap-4">
         <div><h2 className="text-lg font-medium">Agents</h2><p className="mt-1 text-sm text-white/50">Create and monitor agents governed by policy.</p></div>
-        <button type="button" className="border border-white px-3 py-2 text-xs font-medium hover:bg-white hover:text-black" onClick={() => setShowCreate((value) => !value)}>{showCreate ? "Cancel" : "Create agent"}</button>
       </div>
 
-      {showCreate && (
-        <form onSubmit={createAgent} className="mb-4 grid gap-3 border border-white/20 bg-white/[0.03] p-5 sm:grid-cols-2 sm:items-end">
-          <label className="text-xs text-white/60">Agent name<input required value={name} onChange={(event) => setName(event.target.value)} className="mt-2 w-full border border-white/25 bg-black px-3 py-2 text-sm text-white outline-none focus:border-white" placeholder="e.g. Support Agent" /></label>
-          <label className="text-xs text-white/60">Description<input value={description} onChange={(event) => setDescription(event.target.value)} className="mt-2 w-full border border-white/25 bg-black px-3 py-2 text-sm text-white outline-none focus:border-white" placeholder="What does this agent do?" /></label>
-
-          <label className="text-xs text-white/60 sm:col-span-2">Behavior profile name<input required value={profileName} onChange={(event) => setProfileName(event.target.value)} className="mt-2 w-full border border-white/25 bg-black px-3 py-2 text-sm text-white outline-none focus:border-white" placeholder="Support profile" /></label>
-          <label className="text-xs text-white/60">Allowed tools<input value={allowedTools} onChange={(event) => setAllowedTools(event.target.value)} className="mt-2 w-full border border-white/25 bg-black px-3 py-2 text-sm text-white outline-none focus:border-white" placeholder="tool_a, tool_b" /></label>
-          <label className="text-xs text-white/60">Allowed data sources<input value={allowedData} onChange={(event) => setAllowedData(event.target.value)} className="mt-2 w-full border border-white/25 bg-black px-3 py-2 text-sm text-white outline-none focus:border-white" placeholder="source_a, source_b" /></label>
-          <label className="text-xs text-white/60">Allowed actions<input value={allowedActions} onChange={(event) => setAllowedActions(event.target.value)} className="mt-2 w-full border border-white/25 bg-black px-3 py-2 text-sm text-white outline-none focus:border-white" placeholder="read, send_email" /></label>
-          <label className="text-xs text-white/60">Max LLM calls<input type="number" min="1" value={maxLlmCalls} onChange={(event) => setMaxLlmCalls(event.target.value)} className="mt-2 w-full border border-white/25 bg-black px-3 py-2 text-sm text-white outline-none focus:border-white" /></label>
-          <label className="text-xs text-white/60">Warning threshold %<input type="number" min="1" max="100" value={warningThreshold} onChange={(event) => setWarningThreshold(event.target.value)} className="mt-2 w-full border border-white/25 bg-black px-3 py-2 text-sm text-white outline-none focus:border-white" /></label>
-          <label className="text-xs text-white/60">Critical threshold %<input type="number" min="1" max="100" value={criticalThreshold} onChange={(event) => setCriticalThreshold(event.target.value)} className="mt-2 w-full border border-white/25 bg-black px-3 py-2 text-sm text-white outline-none focus:border-white" /></label>
-
-          <button type="submit" className="bg-white px-4 py-2 text-xs font-medium text-black hover:bg-white/80 sm:col-span-2">Create agent</button>
-          {error && <p className="text-xs text-rose-200 sm:col-span-2">{error}</p>}
+      <div className="mt-8">
+        <h3 className="text-sm font-medium">Environment Agents (external URL)</h3>
+        <form onSubmit={createEnvAgent} className="mt-3 flex gap-2">
+          <input placeholder="Name" value={envName} onChange={(e) => setEnvName(e.target.value)} className="border px-2 py-1 bg-black text-white" />
+          <input placeholder="URL" value={envUrl} onChange={(e) => setEnvUrl(e.target.value)} className="border px-2 py-1 bg-black text-white w-1/3" />
+          <input placeholder="Purpose" value={envPurpose} onChange={(e) => setEnvPurpose(e.target.value)} className="border px-2 py-1 bg-black text-white" />
+          <input placeholder="Allowed instructions (comma-separated)" value={envAllowed} onChange={(e) => setEnvAllowed(e.target.value)} className="border px-2 py-1 bg-black text-white w-1/4" />
+          <button className="bg-white px-3 py-1 text-xs text-black" disabled={envLoading}>{envLoading ? "Saving…" : "Register"}</button>
         </form>
-      )}
+
+        <div className="mt-4 space-y-2">
+            <div className="flex gap-2 mb-2">
+            <button
+              className="border px-2 py-1 text-xs"
+              onClick={async () => {
+                const lang = envAgents.find((x) => x.name === "langraph-demo");
+                if (!lang) {
+                  setError("langraph-demo not found. Refresh agents or ensure the backend has auto-registered the demo agent.");
+                  return;
+                }
+                setEnvLoading(true);
+                try {
+                  await triggerEnvAgent(lang.id, { message: "Run demo workflow", instructions: ["read_faq", "invalid_action"] });
+                  await loadLogs(lang.id);
+                } catch (err) {
+                  setError(err?.message || "Simulation failed");
+                } finally {
+                  setEnvLoading(false);
+                }
+              }}
+              disabled={envLoading}
+            >
+              {envLoading ? "Simulating…" : "Simulate Langraph"}
+            </button>
+            <button className="border px-2 py-1 text-xs" onClick={() => { setError(""); loadEnvAgents(); }}>Refresh agents</button>
+          </div>
+          {envAgents.map((a) => (
+            <div key={a.id} className="flex items-center justify-between border p-2">
+              <div>
+                <div className="font-medium">{a.name}</div>
+                <div className="text-xs text-white/60">{a.url} · {a.purpose}</div>
+                {a.allowed_instructions && a.allowed_instructions.length > 0 && (
+                  <div className="text-xs text-white/50">Allowed: {a.allowed_instructions.join(", ")}</div>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button className="border px-2 py-1 text-xs" onClick={() => triggerEnv(a.id)}>Trigger</button>
+                <button className="border px-2 py-1 text-xs" onClick={() => loadLogs(a.id)}>View logs</button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {showLogsFor && (
+          <div className="mt-3 border p-3 bg-white/5">
+            <h4 className="text-xs font-medium">Logs (latest)</h4>
+            <div className="mt-2 text-xs">
+              {envLogs.length === 0 && <div className="text-white/60">No logs</div>}
+              {envLogs.map((l, i) => (
+                <div key={i} className="mt-2 border-t pt-2">
+                  <div className="font-mono text-xs text-white/60">{l.timestamp}</div>
+                  <div className="text-sm">Request: {JSON.stringify(l.request)}</div>
+                  <div className="text-sm">Response: {typeof l.response === 'string' ? l.response : JSON.stringify(l.response)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="mb-4">
+        <div><h2 className="text-lg font-medium">Agents</h2><p className="mt-1 text-sm text-white/50">External environment agent integration only.</p></div>
+      </div>
 
 
       <div className="space-y-3">
@@ -199,29 +294,7 @@ export default function Agents({
                     {deletingId === agent.id ? "Deleting…" : "Delete agent"}
                   </button>
               )}
-              <button
-                type="button"
-                className="ml-2 border px-3 py-1 text-xs"
-                onClick={async () => {
-                  setSimLoadingId(agent.id);
-                  setSimResult(null);
-                  try {
-                    await simulateAgent(agent.id, 5);
-                    setSimResult({ message: "Simulation created" });
-                    await onSimulate?.();
-                  } catch (err) {
-                    setSimResult({ error: err?.message || "Simulation failed" });
-                  } finally {
-                    setSimLoadingId(null);
-                    setTimeout(() => setSimResult(null), 3000);
-                  }
-                }}
-                disabled={simLoadingId === agent.id}
-              >
-                {simLoadingId === agent.id ? "Simulating…" : "Simulate"}
-              </button>
-              {simResult && simResult.error && <div className="mt-2 text-xs text-rose-200">{simResult.error}</div>}
-              {simResult && simResult.message && <div className="mt-2 text-xs text-white/60">{simResult.message}</div>}
+              <div className="ml-2 text-xs text-white/60">Simulations must be run via an external environment agent.</div>
             </div>
 
           </article>

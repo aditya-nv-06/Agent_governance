@@ -22,8 +22,6 @@ def get_audit_events(
 
     events = (
         db.query(AuditEvent)
-        .join(Agent, AuditEvent.agent_id == Agent.id)
-        .filter(Agent.owner_id == admin.id)
         .order_by(
             AuditEvent.created_at.desc()
         )
@@ -47,7 +45,7 @@ def get_audit_events(
             "event_type": event.event_type,
             "actor": event.actor,
             "details": event.details,
-            "created_at": event.created_at,
+            "created_at": event.created_at.isoformat() if event.created_at else None,
         }
         for event in events
     ]

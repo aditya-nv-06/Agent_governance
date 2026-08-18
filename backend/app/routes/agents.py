@@ -42,7 +42,6 @@ def get_agents(
 
     return (
         db.query(Agent)
-        .filter(Agent.owner_id == admin.id)
         .order_by(Agent.name)
         .all()
     )
@@ -76,9 +75,13 @@ def delete_agent(
 ):
     try:
         logger.info("Delete agent requested: admin=%s agent_id=%s", admin.email, agent_id)
-        agent = get_owned_agent(db, agent_id, admin)
+        agent = db.get(Agent, agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        if agent.owner_id and agent.owner_id != admin.id:
+            raise HTTPException(status_code=403, detail="Not authorized to delete this agent")
+
         finding_ids = [item[0] for item in db.query(Finding.id).filter(Finding.agent_id == agent.id).all()]
-        run_ids = [item[0] for item in db.query(AgentRun.id).filter(AgentRun.agent_id == agent.id).all()]
         if finding_ids:
             db.query(Approval).filter(Approval.finding_id.in_(finding_ids)).delete(synchronize_session=False)
             db.query(ResponseAction).filter(ResponseAction.finding_id.in_(finding_ids)).delete(synchronize_session=False)
@@ -90,6 +93,8 @@ def delete_agent(
         db.delete(agent)
         db.commit()
         logger.info("Agent deleted: admin=%s agent=%s", admin.email, agent.id)
+    except HTTPException:
+        raise
     except Exception as error:
         logger.exception("Failed to delete agent %s for admin %s", agent_id, getattr(admin, "email", None))
         raise HTTPException(status_code=500, detail=str(error)) from error

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 
 from .auth import require_admin
 from .routes import agents, approvals, audit, auth, events, findings, profiles, run, tools, simulate
+from .routes import environment, external_integration
 
 api_router = APIRouter()
 admin_only = [Depends(require_admin)]
@@ -15,6 +16,10 @@ api_router.include_router(audit.router, dependencies=admin_only)
 api_router.include_router(tools.router, dependencies=admin_only)
 api_router.include_router(events.router, dependencies=admin_only)
 api_router.include_router(simulate.router, dependencies=admin_only)
+api_router.include_router(environment.router, dependencies=admin_only)
+
+# External integration routes (no auth required)
+api_router.include_router(external_integration.router)
 api_router.add_api_route(
     "/audit-events",
     audit.get_audit_events,

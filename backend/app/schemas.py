@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Optional, List, Dict, Any
 
 from pydantic import BaseModel, Field
 
@@ -97,12 +98,12 @@ class ProfileResponse(BaseModel):
 
 class ApprovalDecisionRequest(BaseModel):
     approved: bool
-    decided_by: str = Field(min_length=1, max_length=100)
-    reason: str = Field(min_length=1, max_length=1000)
+    decided_by: str = Field(default="governance-admin", max_length=100)
+    reason: Optional[str] = Field(default="Reviewed by governance administrator", max_length=1000)
 
 class ApprovalReviewRequest(BaseModel):
-    decision_reason: str = Field(min_length=1, max_length=1000)
-    decided_by: str = Field(default="human_reviewer", min_length=1, max_length=100)
+    decision_reason: Optional[str] = Field(default="Reviewed by governance administrator", max_length=1000)
+    decided_by: str = Field(default="governance-admin", max_length=100)
 
 class RunCreate(BaseModel):
     agent_id: uuid.UUID

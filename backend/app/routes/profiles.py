@@ -16,8 +16,6 @@ router = APIRouter(prefix="/profiles", tags=["Behavior profiles"])
 def list_profiles(db: Session = Depends(get_db), admin: AdminUser = Depends(require_admin)):
     return (
         db.query(BehaviorProfile)
-        .join(Agent, BehaviorProfile.agent_id == Agent.id)
-        .filter(Agent.owner_id == admin.id)
         .order_by(BehaviorProfile.name)
         .all()
     )

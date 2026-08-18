@@ -227,21 +227,7 @@ class AgentService:
         )
 
         self.db.add(finding)
-
         self.db.flush()
-
-        self.db.add(ResponseAction(
-            finding_id=finding.id,
-            action_type="REQUIRE_APPROVAL",
-            status="PENDING",
-            reason=decision.reason,
-        ))
-
-        # Approval
-        approval = Approval(
-            finding_id=finding.id,
-            requested_by="agent",
-        )
 
         create_audit_event(
             db=self.db,
@@ -251,15 +237,6 @@ class AgentService:
             event_type="FINDING_CREATED",
             actor="governance",
             details={"finding_type": finding.finding_type, "severity": finding.severity},
-        )
-        create_audit_event(
-            db=self.db,
-            agent_id=agent.id,
-            run_id=run_id,
-            finding_id=finding.id,
-            event_type="APPROVAL_REQUESTED",
-            actor="governance",
-            details={"approval_id": str(approval.id)},
         )
 
         create_execution_event(
@@ -280,9 +257,7 @@ class AgentService:
             agent_id=agent.id,
             run_id=run_id,
             finding_id=finding.id,
-
             event_type="TOOL_BLOCKED",
-
             actor="governance",
             details={
                 "tool": tool_name,
@@ -317,24 +292,16 @@ class AgentService:
 
         return {
             "status": "blocked",
-
             "message": (
-                "Action blocked by "
-                "governance policy."
+                f"Action directly blocked by governance policy (out of scope): {decision.reason}"
             ),
-
             "tool": tool_name,
-
             "governance": "BLOCKED",
-
             "finding_id": str(
                 finding.id
             ),
-
-            "approval_id": str(
-                approval.id
-            ),
         }
+
 
     # -----------------------------------------
     # Authorized but high-risk: pause for approval

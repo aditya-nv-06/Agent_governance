@@ -27,8 +27,6 @@ def get_findings(
 
     return (
         db.query(Finding)
-        .join(Agent, Finding.agent_id == Agent.id)
-        .filter(Agent.owner_id == admin.id)
         .order_by(
             Finding.created_at.desc()
         )

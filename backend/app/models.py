@@ -349,3 +349,32 @@ class AuditEvent(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class EnvAgent(Base):
+    __tablename__ = "env_agents"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    purpose: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("admin_users.id"), nullable=True, index=True
+    )
+    allowed_instructions: Mapped[list] = mapped_column(
+        JSON,
+        default=list,
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class EnvLog(Base):
+    __tablename__ = "env_logs"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("env_agents.id"), nullable=False)
+    request: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    response: Mapped[dict | str] = mapped_column(JSON, default=dict, nullable=True)
+    status_code: Mapped[int | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

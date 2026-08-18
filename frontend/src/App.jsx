@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import AgentRunner from "./components/AgentRunner";
 import AuthPage from "./components/AuthPage";
 import Agents from "./components/Agents";
-import Simulate from "./components/Simulate";
+import CustomerService from "./components/CustomerService";
 import Analytics from "./components/Analytics";
 import Approvals from "./components/Approvals";
 import AuditEvents from "./components/AuditEvents";
@@ -38,6 +38,35 @@ function App() {
     }
   }, []);
 
+  // Merge simulation response payload (from CustomerService) into dashboard for immediate UI updates
+  async function mergeSimulationResults(simResponse) {
+    if (!simResponse) return loadDashboard();
+    try {
+      const data = await getDashboardData();
+
+      // simulation returns a `series` array where each step includes `audit_events` and `findings`
+      const series = Array.isArray(simResponse.series) ? simResponse.series : [];
+      const simAudit = series.flatMap((s) => (Array.isArray(s.audit_events) ? s.audit_events : []));
+      const simFindings = series.flatMap((s) => (Array.isArray(s.findings) ? s.findings : []));
+
+      const mergedAudit = simAudit.length ? [...simAudit, ...(data.auditEvents || [])] : data.auditEvents;
+      const mergedFindings = simFindings.length ? [...simFindings, ...(data.findings || [])] : data.findings;
+
+      // For runs, try to extract any run ids from series steps
+      const simRuns = series.flatMap((s) => (s.run_id ? [{ id: s.run_id, trace_id: s.trace_id, status: s.approval_status }] : []));
+      const mergedRuns = simRuns.length ? [...simRuns, ...(data.runs || [])] : data.runs;
+
+      setDashboard({
+        ...data,
+        auditEvents: mergedAudit,
+        findings: mergedFindings,
+        runs: mergedRuns,
+      });
+    } catch (err) {
+      await loadDashboard();
+    }
+  }
+
   useEffect(() => {
     if (!session) return undefined;
     let active = true;
@@ -62,16 +91,53 @@ function App() {
   const stats = useMemo(() => ({
     agents: dashboard.agents.length,
     activeRuns: dashboard.runs.filter((run) => run.status === "running").length,
-    openFindings: dashboard.findings.filter((finding) => finding.status === "open" || !finding.status).length,
-    pendingApprovals: dashboard.approvals.filter((approval) => approval.status === "PENDING").length,
+    openFindings: dashboard.findings.filter((finding) => String(finding.status).toLowerCase() === "open" || !finding.status).length,
+    pendingApprovals: dashboard.approvals.filter((approval) => String(approval.status).toUpperCase() === "PENDING").length,
   }), [dashboard]);
 
   async function handleApproval(approvalId, decision) {
+    const isApproved = Boolean(decision.approved);
+    const nextStatus = isApproved ? "APPROVED" : "REJECTED";
+
+    // 1. Instant Optimistic State Update for instantaneous count reduction
+    setDashboard((prev) => {
+      const targetApproval = prev.approvals.find((a) => String(a.id) === String(approvalId));
+      const findingId = targetApproval?.finding_id;
+
+      const nextApprovals = prev.approvals.map((a) =>
+        String(a.id) === String(approvalId)
+          ? {
+              ...a,
+              status: nextStatus,
+              decided_by: decision.decided_by || "governance-admin",
+              decision_reason: decision.reason,
+            }
+          : a
+      );
+
+      const nextFindings = findingId
+        ? prev.findings.map((f) =>
+            String(f.id) === String(findingId)
+              ? { ...f, status: isApproved ? "approved" : "rejected" }
+              : f
+          )
+        : prev.findings;
+
+      return {
+        ...prev,
+        approvals: nextApprovals,
+        findings: nextFindings,
+      };
+    });
+
     try {
       await decideApproval(approvalId, decision);
-      await loadDashboard();
+      // 2. Refresh authoritative dashboard data
+      const data = await getDashboardData();
+      setDashboard(data);
     } catch (requestError) {
       setError(requestError.message || "Unable to record decision.");
+      await loadDashboard();
     }
   }
 
@@ -149,9 +215,16 @@ function App() {
         <Stats {...stats} />
 
         <div className="mt-10 space-y-10">
-          <Agents agents={dashboard.agents} profiles={dashboard.profiles} onCreateAgent={handleCreateAgent} onDeleteAgent={handleDeleteAgent} onCreateProfile={handleCreateProfile} onSimulate={loadDashboard} />
+          <Agents
+            agents={dashboard.agents}
+            profiles={dashboard.profiles}
+            onCreateAgent={handleCreateAgent}
+            onDeleteAgent={handleDeleteAgent}
+            onCreateProfile={handleCreateProfile}
+            onSimulate={loadDashboard}
+          />
           {dashboard.agents[0] && <AgentRunner agentId={dashboard.agents[0].id} onComplete={loadDashboard} />}
-          <Simulate agents={dashboard.agents} onComplete={loadDashboard} />
+          <CustomerService onSimulateComplete={mergeSimulationResults} />
           <Analytics analytics={dashboard.analytics || []} />
           <Runs
             runs={dashboard.runs}
@@ -162,6 +235,7 @@ function App() {
             findings={dashboard.findings}
             agents={dashboard.agents}
             approvals={dashboard.approvals}
+            onDecision={handleApproval}
           />
           <Approvals
             approvals={dashboard.approvals}
