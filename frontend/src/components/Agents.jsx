@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { registerEnvAgent, getEnvAgents, triggerEnvAgent, getEnvLogs } from "../services/api";
 
 export default function Agents({
   agents,
@@ -26,85 +25,42 @@ export default function Agents({
   const [simResult, setSimResult] = useState(null);
   const [showProfileForm, setShowProfileForm] = useState({});
   const [profileForm, setProfileForm] = useState({});
-  const [envName, setEnvName] = useState("");
-  const [envUrl, setEnvUrl] = useState("");
-  const [envPurpose, setEnvPurpose] = useState("");
-  const [envAllowed, setEnvAllowed] = useState("");
-  const [envAgents, setEnvAgents] = useState([]);
-  const [envLogs, setEnvLogs] = useState([]);
-  const [envLoading, setEnvLoading] = useState(false);
-  const [showLogsFor, setShowLogsFor] = useState(null);
+  const [createName, setCreateName] = useState("");
+  const [createDescription, setCreateDescription] = useState("");
+  const [createLoading, setCreateLoading] = useState(false);
 
   function parseList(value) {
     return (value || "").split(",").map((item) => item.trim()).filter(Boolean);
   }
 
-  // Internal agent creation removed — external environment agents only
-
-  async function loadEnvAgents() {
-    try {
-      const list = await getEnvAgents();
-      setEnvAgents(list || []);
-    } catch {
-      setEnvAgents([]);
-      setError("Failed to load environment agents. You may need to login or start the backend (check VITE_API_URL).");
-    }
-  }
-
-  useEffect(() => {
-    loadEnvAgents();
-  }, []);
-
-  // Auto-refresh logs when a specific agent's logs are shown
-  useEffect(() => {
-    if (!showLogsFor) return;
-    const id = showLogsFor;
-    loadLogs(id);
-    const t = setInterval(() => loadLogs(id), 3000);
-    return () => clearInterval(t);
-  }, [showLogsFor]);
-
-  async function createEnvAgent(e) {
-    e.preventDefault();
-    if (!envName || !envUrl) return;
-    setEnvLoading(true);
+  // Creation form for internal agents (provides a default behavior profile)
+  async function handleCreateAgent(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!createName) return;
+    setCreateLoading(true);
     setError("");
     try {
-      const allowedList = (envAllowed || "").split(",").map((s) => s.trim()).filter(Boolean);
-      await registerEnvAgent({ name: envName, url: envUrl, purpose: envPurpose, allowed_instructions: allowedList });
-      setEnvName("");
-      setEnvUrl("");
-      setEnvPurpose("");
-      setEnvAllowed("");
-      await loadEnvAgents();
-      await onSimulate?.();
-    } catch (err) {
-      setError(err?.message || "Failed to register environment agent");
-    } finally {
-      setEnvLoading(false);
-    }
-  }
+      const payload = {
+        name: createName,
+        description: createDescription || "",
+        profile: {
+          name: `${createName} profile`,
+          allowed_tools: [],
+          allowed_data_sources: [],
+          allowed_actions: [],
+          max_llm_calls: 1000,
+          warning_threshold: 80,
+          critical_threshold: 90,
+        },
+      };
 
-  async function triggerEnv(agentId) {
-    setEnvLoading(true);
-    try {
-      await triggerEnvAgent(agentId, { message: "Hello from UI" });
-      await loadLogs(agentId);
-      await onSimulate?.();
+      await onCreateAgent(payload);
+      setCreateName("");
+      setCreateDescription("");
     } catch (err) {
-      // ignore
+      setError(err?.message || "Failed to create agent");
     } finally {
-      setEnvLoading(false);
-    }
-  }
-
-  async function loadLogs(agentId = null) {
-    try {
-      const logs = await getEnvLogs(agentId);
-      setEnvLogs(logs || []);
-      setShowLogsFor(agentId);
-    } catch {
-      setEnvLogs([]);
+      setCreateLoading(false);
     }
   }
 
@@ -112,79 +68,7 @@ export default function Agents({
 
     <section>
 
-      <div className="mb-4 flex items-center justify-between gap-4">
-        <div><h2 className="text-lg font-medium">Agents</h2><p className="mt-1 text-sm text-white/50">Create and monitor agents governed by policy.</p></div>
-      </div>
-
-      <div className="mt-8">
-        <h3 className="text-sm font-medium">Environment Agents (external URL)</h3>
-        <form onSubmit={createEnvAgent} className="mt-3 flex gap-2">
-          <input placeholder="Name" value={envName} onChange={(e) => setEnvName(e.target.value)} className="border px-2 py-1 bg-black text-white" />
-          <input placeholder="URL" value={envUrl} onChange={(e) => setEnvUrl(e.target.value)} className="border px-2 py-1 bg-black text-white w-1/3" />
-          <input placeholder="Purpose" value={envPurpose} onChange={(e) => setEnvPurpose(e.target.value)} className="border px-2 py-1 bg-black text-white" />
-          <input placeholder="Allowed instructions (comma-separated)" value={envAllowed} onChange={(e) => setEnvAllowed(e.target.value)} className="border px-2 py-1 bg-black text-white w-1/4" />
-          <button className="bg-white px-3 py-1 text-xs text-black" disabled={envLoading}>{envLoading ? "Saving…" : "Register"}</button>
-        </form>
-
-        <div className="mt-4 space-y-2">
-            <div className="flex gap-2 mb-2">
-            <button
-              className="border px-2 py-1 text-xs"
-              onClick={async () => {
-                const lang = envAgents.find((x) => x.name === "langraph-demo");
-                if (!lang) {
-                  setError("langraph-demo not found. Refresh agents or ensure the backend has auto-registered the demo agent.");
-                  return;
-                }
-                setEnvLoading(true);
-                try {
-                  await triggerEnvAgent(lang.id, { message: "Run demo workflow", instructions: ["read_faq", "invalid_action"] });
-                  await loadLogs(lang.id);
-                } catch (err) {
-                  setError(err?.message || "Simulation failed");
-                } finally {
-                  setEnvLoading(false);
-                }
-              }}
-              disabled={envLoading}
-            >
-              {envLoading ? "Simulating…" : "Simulate Langraph"}
-            </button>
-            <button className="border px-2 py-1 text-xs" onClick={() => { setError(""); loadEnvAgents(); }}>Refresh agents</button>
-          </div>
-          {envAgents.map((a) => (
-            <div key={a.id} className="flex items-center justify-between border p-2">
-              <div>
-                <div className="font-medium">{a.name}</div>
-                <div className="text-xs text-white/60">{a.url} · {a.purpose}</div>
-                {a.allowed_instructions && a.allowed_instructions.length > 0 && (
-                  <div className="text-xs text-white/50">Allowed: {a.allowed_instructions.join(", ")}</div>
-                )}
-              </div>
-              <div className="flex gap-2">
-                <button className="border px-2 py-1 text-xs" onClick={() => triggerEnv(a.id)}>Trigger</button>
-                <button className="border px-2 py-1 text-xs" onClick={() => loadLogs(a.id)}>View logs</button>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {showLogsFor && (
-          <div className="mt-3 border p-3 bg-white/5">
-            <h4 className="text-xs font-medium">Logs (latest)</h4>
-            <div className="mt-2 text-xs">
-              {envLogs.length === 0 && <div className="text-white/60">No logs</div>}
-              {envLogs.map((l, i) => (
-                <div key={i} className="mt-2 border-t pt-2">
-                  <div className="font-mono text-xs text-white/60">{l.timestamp}</div>
-                  <div className="text-sm">Request: {JSON.stringify(l.request)}</div>
-                  <div className="text-sm">Response: {typeof l.response === 'string' ? l.response : JSON.stringify(l.response)}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
+      {/* Agent creation removed - managed via backend or external registration */}
 
       <div className="mb-4">
         <div><h2 className="text-lg font-medium">Agents</h2><p className="mt-1 text-sm text-white/50">External environment agent integration only.</p></div>

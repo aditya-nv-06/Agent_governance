@@ -407,6 +407,9 @@ def submit_approval_request(
             "audit_events": [
                 {
                     "id": str(event.id),
+                    "agent_id": str(event.agent_id) if event.agent_id else None,
+                    "run_id": str(event.run_id) if event.run_id else None,
+                    "finding_id": str(event.finding_id) if event.finding_id else None,
                     "event_type": event.event_type,
                     "actor": event.actor,
                     "details": event.details,

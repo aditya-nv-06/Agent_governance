@@ -56,8 +56,30 @@ function App() {
       const simRuns = series.flatMap((s) => (s.run_id ? [{ id: s.run_id, trace_id: s.trace_id, status: s.approval_status }] : []));
       const mergedRuns = simRuns.length ? [...simRuns, ...(data.runs || [])] : data.runs;
 
+      // Ensure agent created via external connect or inferred from audit events is visible immediately
+      let mergedAgents = data.agents || [];
+      // Prefer explicit agent_id on the top-level response
+      let inferredAgentId = simResponse.agent_id;
+      let inferredAgentName = simResponse.name;
+
+      if (!inferredAgentId && simAudit && simAudit.length) {
+        const fromEvent = simAudit.find((e) => e && (e.agent_id || (e.details && e.details.agent_id)));
+        if (fromEvent) {
+          inferredAgentId = fromEvent.agent_id || (fromEvent.details && fromEvent.details.agent_id);
+          inferredAgentName = inferredAgentName || (fromEvent.details && fromEvent.details.agent_name) || fromEvent.actor;
+        }
+      }
+
+      if (inferredAgentId) {
+        const exists = mergedAgents.find((a) => String(a.id) === String(inferredAgentId));
+        if (!exists) {
+          mergedAgents = [{ id: inferredAgentId, name: inferredAgentName || "External Agent", description: simResponse.url || "" }, ...mergedAgents];
+        }
+      }
+
       setDashboard({
         ...data,
+        agents: mergedAgents,
         auditEvents: mergedAudit,
         findings: mergedFindings,
         runs: mergedRuns,
