@@ -18,7 +18,8 @@ async def connect(request: Optional[ConnectRequest] = None) -> ConnectResponse:
     Validates that the service is running and reachable.
     """
     now = datetime.utcnow().isoformat()
-    service_url = request.url if request and request.url else f"http://localhost:{settings.port}"
+    default_service = getattr(settings, "service_url", f"http://localhost:{settings.port}")
+    service_url = request.url if request and request.url else default_service
     service_name = request.service_name if request and request.service_name else "Customer Service Agent"
 
     return ConnectResponse(
@@ -36,9 +37,10 @@ async def get_connection_info() -> ConnectResponse:
     Get connection status and info for the Customer Service backend.
     """
     now = datetime.utcnow().isoformat()
+    default_service = getattr(settings, "service_url", f"http://localhost:{settings.port}")
     return ConnectResponse(
         status="connected",
-        url=f"http://localhost:{settings.port}",
+        url=default_service,
         service_name="Customer Service Agent",
         timestamp=now,
         message=f"Customer Service Agent backend is active and ready",
