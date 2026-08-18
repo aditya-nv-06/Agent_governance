@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import AgentRunner from "./components/AgentRunner";
 import AuthPage from "./components/AuthPage";
 import Agents from "./components/Agents";
 import CustomerService from "./components/CustomerService";
@@ -237,15 +236,7 @@ function App() {
         <Stats {...stats} />
 
         <div className="mt-10 space-y-10">
-          <Agents
-            agents={dashboard.agents}
-            profiles={dashboard.profiles}
-            onCreateAgent={handleCreateAgent}
-            onDeleteAgent={handleDeleteAgent}
-            onCreateProfile={handleCreateProfile}
-            onSimulate={loadDashboard}
-          />
-          {dashboard.agents[0] && <AgentRunner agentId={dashboard.agents[0].id} onComplete={loadDashboard} />}
+          
           <CustomerService onSimulateComplete={mergeSimulationResults} />
           <Analytics analytics={dashboard.analytics || []} />
           <Runs
