@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import AuthPage from "./components/AuthPage";
-import Agents from "./components/Agents";
 import CustomerService from "./components/CustomerService";
 import Analytics from "./components/Analytics";
 import Approvals from "./components/Approvals";
