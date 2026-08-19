@@ -4,6 +4,17 @@ A full-stack governance layer for LLM-powered agents. The platform enforces whic
 
 Jump to detailed developer docs in `docs/`.
 
+## Brief approach
+
+This project places a governance layer between LLM-powered agents and external systems to ensure safe, auditable, and policy-driven behavior. Key elements:
+
+- Policy evaluation: each agent action is validated against behavior profiles (allowed tools, data sources, and actions).
+- Guardrails and enforcement: the system can block or allow actions, apply warning/critical thresholds, and require human approval for higher-risk operations.
+- Observability: findings, runs, approvals, and audit events are recorded for traceability and post-hoc review.
+- Architecture: decoupled services — FastAPI backend (policy + DB), React + Vite frontend (UI), and a small customer-service backend for simulations; Neon Postgres is used for runtime persistence.
+- Developer ergonomics: a `Makefile` and `run-all.sh` provide a repeatable local dev environment; developer docs live in `docs/`.
+
+
 Quick links
 - `docs/README.md` — project docs index
 - `docs/SETUP.md` — prerequisites and install
