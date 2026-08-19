@@ -235,7 +235,6 @@ function App() {
         <Stats {...stats} />
 
         <div className="mt-10 space-y-10">
-          
           <CustomerService onSimulateComplete={mergeSimulationResults} />
           <Analytics analytics={dashboard.analytics || []} />
           <Runs

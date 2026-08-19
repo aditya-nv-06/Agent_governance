@@ -1,76 +1,74 @@
 # AI Agent Governance Platform
 
-A full-stack governance layer for LLM-powered agents. The app enforces which tools, data sources, and actions are allowed, applies usage guardrails, records audit events, and provides a human-in-the-loop approval flow for high-risk operations.
+A full-stack governance layer for LLM-powered agents. The platform enforces which tools, data sources, and actions are allowed, applies usage guardrails, records audit events, and provides a human-in-the-loop approval flow for higher-risk operations.
+
+Jump to detailed developer docs in `docs/`.
 
 Quick links
-- [Development guide](docs/DEVELOPMENT_GUIDE.md)
-- API docs (when running backend): `/docs`
-
-Why this project
-------------------
-LLM-based agents can propose external actions. This project places a policy layer between the agent and external systems that:
-
-- Blocks unauthorized actions
-- Logs every decision and action to an audit trail
-- Requires human approval for higher-risk actions
-- Tracks usage and enforces warning/critical thresholds
+- `docs/README.md` — project docs index
+- `docs/SETUP.md` — prerequisites and install
+- `docs/RUN.md` — how to run services locally
+- API docs (when running primary backend): `/docs` (FastAPI)
 
 What’s included
-----------------
-- Backend: FastAPI + SQLAlchemy (Postgres supported, SQLite for testing)
+- Backend: FastAPI + SQLAlchemy (Postgres required for runtime; SQLite allowed for tests)
 - Frontend: React + Vite + Tailwind CSS dashboard
 - Governance: policy evaluation, findings, approvals, enforcement
 
 Project layout
---------------
-See the main application folders and responsibilities:
 
 ```
 backend/            Python API, models, governance engine, tests
 frontend/           React dashboard, API client
-docs/               Diagrams and developer documentation
+customer-service-backend/  auxiliary demo service
+docs/               Developer documentation and run instructions
 ```
 
-Quickstart (local)
--------------------
-Prereqs: Python 3.11+, Node.js 18+, PostgreSQL (optional)
+Quickstart (recommended)
 
-1) Backend: create virtualenv and install
+Prereqs: Python 3.10+, Node.js 16+ (Node 18 recommended), Chrome for devtools
+
+From the repository root the fastest path is:
 
 ```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+# install deps for backend, customer-service, and frontend
+make install
+
+# start all dev services (frontend, primary backend, customer service)
+./run-all.sh
 ```
 
-2) Configure environment
+This starts services on these defaults:
+- Frontend: http://localhost:5173
+- Primary Backend: http://localhost:8000
+- Customer Service Backend: http://localhost:8001
 
-Create `backend/.env` with at least:
+Manual component start
+
+- Primary backend (create venv if needed):
 
 ```bash
-DATABASE_URL=postgresql+psycopg://USER:PASSWORD@localhost:5432/agent_governance
-AUTH_SECRET=change-this-secret
-# Optional when using a real LLM provider
-OPENAI_API_KEY=your-key
+python3 -m venv backend/.venv
+source backend/.venv/bin/activate
+pip install -r backend/requirements.txt
+
+# ensure DATABASE_URL is set (Neon Postgres URL)
+export DATABASE_URL="postgresql+psycopg://USER:PASSWORD@host.neon.tech/dbname"
+
+backend/.venv/bin/uvicorn backend.app.main:app --reload --port 8000
 ```
 
-For local development you may allow SQLite for tests by setting `ALLOW_SQLITE_FOR_TESTS=true`.
-
-3) Seed demo data (optional)
+- Customer service:
 
 ```bash
-source .venv/bin/activate
-python seed.py
+python3 -m venv customer-service-backend/.venv
+source customer-service-backend/.venv/bin/activate
+pip install -r customer-service-backend/requirements.txt
+cd customer-service-backend
+./run.py
 ```
 
-4) Run backend
-
-```bash
-uvicorn app.main:app --reload --port 8000
-```
-
-5) Frontend
+- Frontend:
 
 ```bash
 cd frontend
@@ -78,70 +76,24 @@ npm install
 npm run dev
 ```
 
-The frontend proxies `/api` to the backend in dev mode.
+Notes on environment
+- `DATABASE_URL` (required for primary backend) should point to a Neon PostgreSQL instance. You may set it in a `.env` file at the repository root or export it in your shell.
+- The customer service backend reads `.env` in `customer-service-backend/`.
+- For tests only, `ALLOW_SQLITE_FOR_TESTS=true` allows using SQLite test DBs.
 
-API overview & examples
-------------------------
-Key endpoints (authenticated):
-
-- `POST /auth/register` — create an admin
-- `POST /auth/login` — obtain `access_token` and `admin` info
-- `GET /agents` — list agents owned by the admin
-- `POST /agents` — create an agent (must include `profile`)
-- `DELETE /agents/{agent_id}` — delete agent and related records
-- `GET /profiles`, `POST /profiles` — manage behavior profiles
-
-Example: create agent (profile required)
-
-```bash
-curl -i -X POST http://localhost:8000/api/agents \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Support Agent",
-    "description": "Helps customers",
-    "profile": {
-      "name": "Support profile",
-      "allowed_tools": ["send_email"],
-      "allowed_data_sources": ["crm"],
-      "allowed_actions": ["read","send_email"],
-      "max_llm_calls": 1000,
-      "warning_threshold": 80,
-      "critical_threshold": 90
-    }
-  }'
-```
-
-Troubleshooting
----------------
-
-- Agent creation fails: the API enforces a behavior `profile` on create. Ensure the payload includes a `profile` object (see example above).
-- Session shows wrong user: the frontend stores per-admin session data to avoid overwriting multiple admin sessions in the same browser. If you experience wrong sessions, clear stored sessions from the browser (see `Sign out` in the UI).
-- Delete agent appears to do nothing: the backend deletes related findings, runs, approvals, behavior profiles, audit events, and the agent record. If it fails, ensure the authenticated admin owns the agent and check backend logs or the network response in the browser devtools for details.
+Logs and control
+- `make status` — show running PIDs and tail logs
+- `make stop` — stop services started via the Makefile
+- Logs: `logs/backend.log`, `logs/frontend.log`, `logs/customer-service.log`
 
 Testing
--------
+- Backend tests: `make install-backend` then run `pytest` or the project's test commands from `backend/`.
+- Frontend: build check with `cd frontend && npm run build`.
 
-Run backend tests:
-
-```bash
-cd backend
-source .venv/bin/activate
-python -m unittest discover -s tests -v
-```
-
-Run frontend build check:
-
-```bash
-cd frontend
-npm run build
-```
-
-Contributing
-------------
-- See `docs/DEVELOPMENT_GUIDE.md` for local environment setup and tips for working on the codebase.
+Contribution & docs
+- See `docs/CONTRIBUTING.md` for contribution guidance.
+- See `docs/DEVELOPER_RUN_TEST_UI.md` for a manual UI testing checklist and troubleshooting tips.
 
 License & CI
-------------
 - CI workflows validate backend tests and frontend build in `.github/workflows/`.
 
