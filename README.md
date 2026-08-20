@@ -14,6 +14,9 @@ This project places a governance layer between LLM-powered agents and external s
 - Architecture: decoupled services — FastAPI backend (policy + DB), React + Vite frontend (UI), and a small customer-service backend for simulations; Neon Postgres is used for runtime persistence.
 - Developer ergonomics: a `Makefile` and `run-all.sh` provide a repeatable local dev environment; developer docs live in `docs/`.
 
+# Architecture diagram
+![diagram](docs/architecture.png)
+
 
 Quick links
 - `docs/README.md` — project docs index
