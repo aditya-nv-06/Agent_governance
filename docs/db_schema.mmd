@@ -1,0 +1,117 @@
+erDiagram
+    ADMIN_USERS {
+        UUID id PK
+        string email
+        string role
+        DateTime created_at
+    }
+
+    AGENTS {
+        UUID id PK
+        string name
+        string description
+        string status
+        UUID owner_id FK
+    }
+
+    BEHAVIOUR_PROFILES {
+        UUID id PK
+        UUID agent_id FK
+        string name
+        JSON allowed_tools
+        JSON allowed_data_sources
+        JSON allowed_actions
+    }
+
+    AGENT_RUNS {
+        UUID id PK
+        UUID agent_id FK
+        string status
+        string input_message
+        DateTime created_at
+        DateTime completed_at
+    }
+
+    EXECUTION_EVENTS {
+        UUID id PK
+        UUID run_id FK
+        UUID agent_id FK
+        string event_type
+        string tool_name
+        string status
+        JSON details
+        DateTime created_at
+    }
+
+    FINDINGS {
+        UUID id PK
+        UUID agent_id FK
+        UUID run_id
+        string finding_type
+        string severity
+        string expected
+        string actual
+        string reason
+        string status
+        DateTime created_at
+    }
+
+    RESPONSE_ACTIONS {
+        UUID id PK
+        UUID finding_id FK
+        string action_type
+        string status
+        string reason
+    }
+
+    APPROVALS {
+        UUID id PK
+        UUID finding_id FK
+        string status
+        string requested_by
+        string decided_by
+        string decision_reason
+        DateTime created_at
+    }
+
+    AUDIT_EVENTS {
+        UUID id PK
+        UUID agent_id FK
+        UUID run_id
+        UUID finding_id FK
+        string event_type
+        string actor
+        JSON details
+        DateTime created_at
+    }
+
+    ENV_AGENTS {
+        UUID id PK
+        string name
+        string url
+        string purpose
+        UUID owner_id FK
+        JSON allowed_instructions
+        DateTime created_at
+    }
+
+    ENV_LOGS {
+        UUID id PK
+        UUID agent_id FK
+        JSON request
+        JSON response
+        int status_code
+        DateTime created_at
+    }
+
+    ADMIN_USERS ||--o{ AGENTS : owns
+    AGENTS ||--o{ BEHAVIOUR_PROFILES : has
+    AGENTS ||--o{ AGENT_RUNS : "runs"
+    AGENT_RUNS ||--o{ EXECUTION_EVENTS : records
+    AGENTS ||--o{ FINDINGS : generates
+    FINDINGS ||--o{ RESPONSE_ACTIONS : triggers
+    FINDINGS ||--o{ APPROVALS : requires
+    AGENTS ||--o{ AUDIT_EVENTS : logs
+    FINDINGS ||--o{ AUDIT_EVENTS : related
+    ADMIN_USERS ||--o{ ENV_AGENTS : owns
+    ENV_AGENTS ||--o{ ENV_LOGS : logs

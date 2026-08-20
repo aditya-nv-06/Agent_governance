@@ -18,6 +18,19 @@ This project places a governance layer between LLM-powered agents and external s
 ![diagram](docs/architecture.png)
 
 
+## System design & DB schemas
+
+- System design: see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for architecture diagrams and component responsibilities.
+- Database schemas: reference application models in [backend/app/models.py](backend/app/models.py) and migrations in [backend/app/migrations.py](backend/app/migrations.py); backend schema details and migration guidance live in the `backend/` folder and `docs/`.
+- DB schema diagram: see [docs/DB_SCHEMA.md](docs/DB_SCHEMA.md) for a Mermaid ER diagram extracted from the SQLAlchemy models.
+  
+	![DB schema diagram](docs/db_schema.png)
+  
+	(Raw Mermaid source: [docs/db_schema.mmd](docs/db_schema.mmd). SVG: [docs/db_schema.svg](docs/db_schema.svg))
+
+# Db Diagram
+![db](image.png)
+
 Quick links
 - `docs/README.md` — project docs index
 - `docs/SETUP.md` — prerequisites and install
